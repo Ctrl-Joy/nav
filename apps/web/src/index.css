@@ -1,0 +1,342 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/sora/wght.css';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* ------------------------------------------------------------------
+   NAV design tokens — "deep field": navy ink, fibre-optic light.
+   Warm gold on the left of every glass edge, cool blue on the right,
+   echoing light converging on a white-hot centre. Light theme via
+   [data-theme='light'].
+   ------------------------------------------------------------------ */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  /* NEURAL palette */
+  --ink: #ffffff;
+  --sub: #a2a9b8;
+  --nav: #fbfdff;
+  --foot: #f4f8fd;
+  --hair: rgb(196 214 232 / 0.72);
+  --chev: rgb(214 232 250 / 0.9);
+  --navdim: #e8ecf0;
+  --feat: #e2ebf5;
+  --veil: 6, 10, 18;
+  --warm: 255 226 178;
+  --cool: 150 196 244;
+
+  /* App tokens */
+  --bg: #02060f;
+  --bg-elevated: #040914;
+  --surface: #070d19;
+  --surface-2: #0c1322;
+  --surface-3: #131c2e;
+  --border: rgb(196 214 232 / 0.11);
+  --border-strong: rgb(196 214 232 / 0.22);
+  --fg: #ffffff;
+  --fg-muted: #a2a9b8;
+  --fg-subtle: #6b7488;
+  --accent: #cfe6ff;
+  --accent-strong: #ffffff;
+  --accent-fg: #02060f;
+  --accent-soft: rgb(150 196 244 / 0.12);
+  --ring: #9fe0ff;
+  --glow: rgb(168 204 252 / 0.22);
+  --success: #5fe0a3;
+  --success-soft: rgb(95 224 163 / 0.12);
+  --warning: #ffd08a;
+  --warning-soft: rgb(255 208 138 / 0.13);
+  --danger: #ff7b86;
+  --danger-soft: rgb(255 123 134 / 0.12);
+  --info: #9fcdff;
+  --info-soft: rgb(159 205 255 / 0.12);
+  --neutral: #8a93a6;
+  --neutral-soft: rgb(196 214 232 / 0.08);
+  --shadow: 0 14px 38px rgb(2 6 14 / 0.55), 0 0 0 1px rgb(196 214 232 / 0.06);
+  --grid-line: rgb(196 214 232 / 0.04);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --ink: #0b1220;
+  --sub: #4d5668;
+  --hair: rgb(40 60 90 / 0.35);
+  --chev: rgb(40 70 110 / 0.85);
+  --bg: #f6f8fb;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #eef2f7;
+  --surface-3: #e3e9f1;
+  --border: rgb(20 40 70 / 0.1);
+  --border-strong: rgb(20 40 70 / 0.2);
+  --fg: #0b1220;
+  --fg-muted: #4d5668;
+  --fg-subtle: #7d8698;
+  --accent: #0d2a4d;
+  --accent-strong: #02060f;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(40 90 160 / 0.08);
+  --ring: #2b8bd6;
+  --glow: rgb(60 120 200 / 0.16);
+  --success: #12a150;
+  --success-soft: rgb(18 161 80 / 0.1);
+  --warning: #b7791f;
+  --warning-soft: rgb(214 158 46 / 0.14);
+  --danger: #d93636;
+  --danger-soft: rgb(217 54 54 / 0.09);
+  --info: #2f6fde;
+  --info-soft: rgb(47 111 222 / 0.1);
+  --neutral: #6b7584;
+  --neutral-soft: rgb(20 40 70 / 0.06);
+  --shadow: 0 8px 30px rgb(15 23 42 / 0.1);
+  --grid-line: rgb(15 23 42 / 0.05);
+}
+
+@theme inline {
+  --font-sans: 'Sora Variable', 'Sora', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ring: var(--ring);
+  --color-glow: var(--glow);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-neutral: var(--neutral);
+  --color-neutral-soft: var(--neutral-soft);
+
+  /* Sora is variable: fractional weights hit the wght axis directly. */
+  --font-weight-normal: 424;
+  --font-weight-medium: 506;
+  --font-weight-semibold: 581;
+  --font-weight-bold: 660;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-pop: var(--shadow);
+
+  --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+  --animate-fade-in: fade-in 140ms ease-out;
+  --animate-slide-up: slide-up 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+/* Entrance timeline — independent properties only (translate/scale/opacity/clip-path), fill-mode backwards. */
+@keyframes en-wipe {
+  from { clip-path: inset(-0.78em 0 calc(100% + 0.78em) 0); translate: 0 var(--rise, 9px); }
+  to { clip-path: inset(-0.78em 0 -0.78em 0); translate: 0 0; }
+}
+@keyframes en-lift { from { opacity: 0; translate: 0 var(--rise, 9px); } }
+@keyframes en-settle { from { opacity: 0; translate: 0 calc(var(--rise, 9px) * 0.7); scale: 0.99; } }
+@keyframes en-draw { from { scale: 1 0; } }
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-weight: 424;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.006em;
+  }
+  ::selection {
+    background: rgb(var(--cool) / 0.28);
+    color: var(--fg);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  code, kbd, pre, samp {
+    font-family: var(--font-mono);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  dialog::backdrop {
+    background: rgb(2 6 14 / 0.6);
+    backdrop-filter: blur(6px);
+  }
+  button:not(:disabled), [role='button'], summary {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 40%, var(--surface-2) 80%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s linear infinite;
+    border-radius: 8px;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* ---- Buttons -------------------------------------------------------------------------- */
+  .nv-btn {
+    position: relative;
+    isolation: isolate;
+    border-radius: 999px;
+    font-weight: 497;
+    transition: box-shadow 0.25s ease, background 0.25s ease, border-color 0.25s ease, filter 0.25s ease;
+  }
+
+  /* Primary: the fibre-glass CTA — three stacked gradients, warm left edge, cool right edge. */
+  .nv-cta {
+    color: var(--ink);
+    background:
+      linear-gradient(180deg, rgb(6 12 22 / 0) 45%, rgb(6 12 22 / 0.12) 78%, rgb(6 12 22 / 0.28) 100%),
+      linear-gradient(90deg, rgb(255 226 178 / 0.17) 0%, rgb(255 236 208 / 0.07) 22%, rgb(176 206 238 / 0.03) 55%, rgb(150 196 244 / 0.09) 100%),
+      linear-gradient(90deg, rgb(255 255 255 / 0.24) 0%, rgb(255 255 255 / 0.17) 12%, rgb(255 255 255 / 0.11) 26%, rgb(255 255 255 / 0.07) 42%, rgb(255 255 255 / 0.05) 60%, rgb(255 255 255 / 0.04) 80%, rgb(255 255 255 / 0.04) 100%),
+      rgb(8 14 26 / 0.35);
+    -webkit-backdrop-filter: blur(26px) saturate(0.45);
+    backdrop-filter: blur(26px) saturate(0.45);
+    box-shadow:
+      0 -2px 20px rgb(255 224 176 / 0.2),
+      0 0 34px rgb(168 204 252 / 0.16),
+      inset 0 1.6px 0 0 rgb(255 251 242 / 0.45);
+  }
+  /* Gradient hairline border as a masked pseudo-element. */
+  .nv-cta::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.6px;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, rgb(255 252 246 / 0.95) 0%, rgb(255 252 246 / 0.2) 45%, rgb(255 252 246 / 0) 78%),
+      linear-gradient(90deg, rgb(255 228 182 / 0.95) 0%, rgb(250 236 210 / 0.7) 12%, rgb(226 230 234 / 0.03) 32%, rgb(214 226 240 / 0.02) 62%, rgb(200 228 250 / 0.7) 90%, rgb(186 224 247 / 0.95) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+  .nv-cta:hover {
+    box-shadow:
+      0 -2px 26px rgb(255 224 176 / 0.3),
+      0 0 44px rgb(168 204 252 / 0.26),
+      inset 0 1.6px 0 0 rgb(255 251 242 / 0.6);
+    filter: brightness(1.08);
+  }
+
+  /* Secondary: hairline pill. */
+  .nv-hair {
+    color: var(--nav);
+    border: 1px solid var(--hair);
+    background: rgb(255 255 255 / 0.03);
+    -webkit-backdrop-filter: blur(20px) saturate(0.45);
+    backdrop-filter: blur(20px) saturate(0.45);
+  }
+  .nv-hair:hover {
+    background: rgb(255 255 255 / 0.08);
+    border-color: rgb(214 232 250 / 0.95);
+    box-shadow: 0 0 22px rgb(168 204 252 / 0.14);
+  }
+
+  [data-theme='light'] .nv-cta:not([data-theme='dark'] *) {
+    color: #fff;
+    background: linear-gradient(90deg, #2a2418 0%, #0f1a2c 55%, #10233d 100%);
+    box-shadow: 0 0 18px var(--glow), inset 0 1px 0 rgb(255 251 242 / 0.25);
+  }
+  [data-theme='light'] .nv-hair:not([data-theme='dark'] *) {
+    color: var(--fg);
+    background: #fff;
+  }
+  [data-theme='light'] .nav-mark:not([data-theme='dark'] *) { filter: invert(1); }
+
+  /* Glass panel — the CTA recipe restated at panel scale. */
+  .nv-panel {
+    border: 1px solid rgb(196 214 232 / 0.12);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.07) 0%, rgb(255 255 255 / 0.025) 100%),
+      linear-gradient(90deg, rgb(255 226 178 / 0.035) 0%, rgb(150 196 244 / 0.045) 100%),
+      linear-gradient(180deg, rgb(6 12 22 / 0.6) 0%, rgb(6 12 22 / 0.72) 100%);
+    -webkit-backdrop-filter: blur(26px) saturate(0.45);
+    backdrop-filter: blur(26px) saturate(0.45);
+    box-shadow: 0 14px 38px rgb(2 6 14 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+  [data-theme='light'] .nv-panel:not([data-theme='dark'] *) {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: var(--shadow);
+  }
+
+  /* Active sidebar item: glass with the warm/cool edge. */
+  .nv-active {
+    color: var(--fg);
+    border-color: rgb(196 214 232 / 0.18);
+    background:
+      linear-gradient(90deg, rgb(255 226 178 / 0.09) 0%, rgb(255 255 255 / 0.04) 40%, rgb(150 196 244 / 0.08) 100%),
+      rgb(255 255 255 / 0.03);
+    box-shadow: inset 0 1px 0 rgb(255 251 242 / 0.12);
+  }
+  [data-theme='light'] .nv-active:not([data-theme='dark'] *) { background: var(--surface-2); }
+
+  /* Chevron bullet + vertical rule from the hero language. */
+  .nv-chev { fill: none; stroke: var(--chev); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .nv-rule { background: linear-gradient(180deg, rgb(186 200 214 / 0.7) 0%, rgb(206 220 232 / 0.92) 52%, rgb(182 198 212 / 0.68) 100%); }
+
+  .log-line mark {
+    background: rgb(255 208 138 / 0.35);
+    color: inherit;
+    border-radius: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

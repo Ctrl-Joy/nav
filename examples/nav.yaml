@@ -1,0 +1,38 @@
+# Example blueprint: a web service backed by Postgres, a worker, and a cron job.
+databases:
+  - name: example-db
+    plan: basic-256mb
+    databaseName: app
+    user: app
+
+envVarGroups:
+  - name: shared
+    envVars:
+      - key: GREETING
+        value: Hello from a NAV blueprint
+
+services:
+  - type: web
+    name: bp-web
+    runtime: node
+    rootDir: node-web
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: { name: example-db, property: connectionString }
+      - key: SESSION_SECRET
+        generateValue: true
+      - fromGroup: shared
+  - type: worker
+    name: bp-worker
+    runtime: node
+    rootDir: worker
+    envVars:
+      - key: API_HOST
+        fromService: { name: bp-web, type: web, property: hostport }
+  - type: cron
+    name: bp-cron
+    runtime: node
+    rootDir: cron-job
+    schedule: "* * * * *"
+    startCommand: node task.js

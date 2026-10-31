@@ -1,0 +1,24 @@
+{
+  "name": "@nav/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command-line client for NAV",
+  "type": "module",
+  "bin": {
+    "nav": "./bin/nav.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nav/shared": "*"
+  }
+}

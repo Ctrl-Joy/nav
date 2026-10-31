@@ -1,0 +1,22 @@
+{
+  "name": "nav",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NAV — a self-hostable platform-as-a-service",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test \"apps/*/test/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  }
+}

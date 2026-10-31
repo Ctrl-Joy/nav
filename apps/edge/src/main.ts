@@ -1,0 +1,100 @@
+// NAV edge: public ingress, reverse proxy, load balancer, TLS terminator and static file server.
+import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
+import pg from 'pg';
+import { config } from '@nav/shared/config';
+import { decrypt } from '@nav/shared/crypto';
+import { DbRouteWatcher, RouteTable, routeLoader } from './routes.ts';
+import { CertStore, certLoader, ensureDevCerts } from './tls.ts';
+import { Metrics } from './metrics.ts';
+import { Edge } from './proxy.ts';
+
+const log = (m: string) => console.error(m);
+const production = config.env === 'production';
+
+const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 8, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
+pool.on('error', (err) => log(`[edge] pg pool error: ${err.message}`));
+
+const table = new RouteTable(config.appsDomain);
+const dev = ensureDevCerts(config.dataDir, config.appsDomain);
+const certs = new CertStore({ cert: dev.cert, key: dev.key }, decrypt, log);
+const metrics = new Metrics(pool, log);
+
+const edge = new Edge({
+  table,
+  production,
+  metrics,
+  accessLog: process.env.NAV_EDGE_ACCESS_LOG === '1',
+  forceHttps: process.env.NAV_EDGE_FORCE_HTTPS === '1',
+  httpsPort: config.edgeHttpsPort,
+  hasCert: (host) => certs.hasCert(host),
+  acmeLookup: async (token) => {
+    const { rows } = await pool.query<{ key_auth: string }>('SELECT key_auth FROM acme_challenges WHERE token = $1', [token]);
+    return rows[0]?.key_auth ?? null;
+  },
+  log,
+});
+
+const watcher = new DbRouteWatcher({
+  pool,
+  createListener: () => new pg.Client({ connectionString: config.databaseUrl, connectionTimeoutMillis: 5_000, keepAlive: true }),
+  loaders: [routeLoader(pool, table), certLoader(pool, certs)],
+  log,
+});
+
+const httpServer = http.createServer();
+const httpsServer = https.createServer({
+  cert: dev.cert,
+  key: dev.key,
+  SNICallback: certs.sniCallback,
+  minVersion: 'TLSv1.2',
+  ALPNProtocols: ['http/1.1'],
+});
+edge.attach(httpServer, false);
+edge.attach(httpsServer, true);
+
+function listen(server: http.Server | https.Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, () => { server.off('error', reject); resolve(); });
+  });
+}
+
+async function main(): Promise<void> {
+  await watcher.start(); // first load failure is tolerated: we serve 404s until the DB is reachable
+  metrics.start(10_000);
+  await listen(httpServer, config.edgeHttpPort);
+  await listen(httpsServer, config.edgeHttpsPort);
+  log(`[edge] ${os.hostname()} listening http :${config.edgeHttpPort} https :${config.edgeHttpsPort} (apps domain ${config.appsDomain}, ${table.size} routes, ${certs.size} certs)`);
+  log(`[edge] local dev CA${dev.generated ? ' (generated)' : ''}: ${dev.caPath} — trust it to avoid TLS warnings for *.${config.appsDomain}`);
+}
+
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`[edge] ${signal} received, draining (max 10s)`);
+  const closed = Promise.all([httpServer, httpsServer].map((s) => new Promise<void>((r) => s.close(() => r()))));
+  httpServer.closeIdleConnections();
+  httpsServer.closeIdleConnections();
+  const force = setTimeout(() => {
+    httpServer.closeAllConnections();
+    httpsServer.closeAllConnections();
+    edge.closeAll();
+  }, 10_000);
+  force.unref();
+  await Promise.race([closed, new Promise((r) => setTimeout(r, 10_500))]);
+  edge.closeAll();
+  await watcher.stop();
+  await metrics.stop().catch(() => {});
+  await pool.end().catch(() => {});
+  process.exit(0);
+}
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+main().catch((err) => {
+  log(`[edge] fatal: ${(err as Error).stack ?? err}`);
+  process.exit(1);
+});

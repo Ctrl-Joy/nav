@@ -1,0 +1,5 @@
+{
+  "name": "nav-example-static",
+  "private": true,
+  "scripts": { "build": "node build.js" }
+}
