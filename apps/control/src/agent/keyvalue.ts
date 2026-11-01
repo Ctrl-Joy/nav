@@ -3,6 +3,7 @@
 // The server's plaintext port is bound to the node's private interface only. External access (an IP allow list is
 // set) goes through a TLS-terminating proxy on its own port that enforces the allow list (kvTls.ts).
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -185,9 +186,26 @@ async function stopInstance(ctx: Ctx, kv: Row, remove: boolean): Promise<void> {
   if (remove) await rm(kvDir(kv.id), { recursive: true, force: true }).catch(() => {});
 }
 
+/** Resolves once the server accepts TCP connections (it starts listening a moment after the process starts). */
+async function waitListening(port: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await new Promise<boolean>((resolve) => {
+      const s = net.connect({ host: config.nodeBindIp, port }, () => { s.destroy(); resolve(true); });
+      s.once('error', () => resolve(false));
+      s.setTimeout(1000, () => { s.destroy(); resolve(false); });
+    });
+    if (ok) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`Key Value server did not start listening on port ${port} within ${timeoutMs / 1000}s`);
+}
+
 async function start(ctx: Ctx, kv: Row): Promise<void> {
   const port = kv.port ?? (await freePort());
   const ref = ctx.driver.name === 'docker' ? await startContainer(kv, port) : String(await startProcess(kv, port));
+  // Only report it available once clients can actually connect.
+  await waitListening(port);
   const tlsColumns = await ensureProxy(kv, port);
   await setStatus(kv, 'available', { driver: ctx.driver.name, node_id: ctx.nodeId, ref, host: config.nodeAddress, port, ...tlsColumns });
 }
