@@ -1,5 +1,5 @@
-// TLS: SNI certificate selection from the `certificates` table, plus a self-generated local
-// dev CA + wildcard certificate used as the default (fallback) certificate.
+// TLS: SNI certificate selection from the `certificates` table (custom domains and the platform wildcard) or
+// operator-supplied wildcard files, plus a self-generated local dev CA + wildcard used as the last-resort fallback.
 import fs from 'node:fs';
 import path from 'node:path';
 import tls from 'node:tls';
@@ -140,20 +140,47 @@ export function ensureDevCerts(dataDir: string, appsDomain: string): DevCerts {
 
 export interface CertRow { domain: string; cert_pem: string; key_enc: string }
 
+/**
+ * Selection order: exact custom-domain certificate; for `<appsDomain>` and names exactly one label under it the
+ * platform wildcard (operator files, else the ACME one stored as '*.<appsDomain>'); other one-label wildcards;
+ * otherwise null and the SNI callback serves the self-signed development certificate.
+ */
 export class CertStore {
   private contexts = new Map<string, tls.SecureContext>();
   private fingerprints = new Map<string, string>();
   private fallback: tls.SecureContext;
   private decrypt: (s: string) => string;
   private log: (m: string) => void;
+  private appsDomain: string | null;
+  private platformFile: tls.SecureContext | null = null;
 
-  constructor(defaultCert: { cert: string; key: string }, decrypt: (s: string) => string, log: (m: string) => void = (m) => console.error(m)) {
+  constructor(defaultCert: { cert: string; key: string }, decrypt: (s: string) => string, log: (m: string) => void = (m) => console.error(m), opts: { appsDomain?: string } = {}) {
     this.fallback = tls.createSecureContext({ cert: defaultCert.cert, key: defaultCert.key, minVersion: 'TLSv1.2' });
     this.decrypt = decrypt;
     this.log = log;
+    this.appsDomain = opts.appsDomain?.toLowerCase().replace(/\.$/, '') || null;
   }
 
   get size(): number { return this.contexts.size; }
+
+  /** Operator-supplied wildcard (NAV_WILDCARD_CERT_FILE / NAV_WILDCARD_KEY_FILE); null clears it. Throws if invalid. */
+  setPlatformFiles(pem: { cert: string; key: string } | null): void {
+    this.platformFile = pem ? tls.createSecureContext({ cert: pem.cert, key: pem.key, minVersion: 'TLSv1.2' }) : null;
+  }
+
+  /** Where the apps-domain certificate comes from; null means the development fallback. */
+  platformSource(): 'files' | 'acme' | null {
+    if (this.platformFile) return 'files';
+    return this.appsDomain && this.contexts.has(`*.${this.appsDomain}`) ? 'acme' : null;
+  }
+
+  private platform(name: string): tls.SecureContext | null {
+    const d = this.appsDomain;
+    if (!d) return null;
+    const under = name.endsWith(`.${d}`) && !name.slice(0, -d.length - 1).includes('.') && name.length > d.length + 1;
+    if (name !== d && !under) return null;
+    return this.platformFile ?? this.contexts.get(`*.${d}`) ?? null;
+  }
 
   setRows(rows: CertRow[]): void {
     const next = new Map<string, tls.SecureContext>();
@@ -185,6 +212,8 @@ export class CertStore {
     const name = servername.toLowerCase().replace(/\.$/, '');
     const exact = this.contexts.get(name);
     if (exact) return exact;
+    const platform = this.platform(name);
+    if (platform) return platform;
     const dot = name.indexOf('.');
     if (dot > 0) {
       const wild = this.contexts.get(`*.${name.slice(dot + 1)}`);
@@ -208,5 +237,52 @@ export function certLoader(pool: pg.Pool, store: CertStore): () => Promise<void>
   return async () => {
     const { rows } = await pool.query<CertRow>('SELECT domain, cert_pem, key_enc FROM certificates WHERE not_after > now()');
     store.setRows(rows);
+  };
+}
+
+/**
+ * Loads the operator's wildcard PEM files (manual mode) and reloads them when their size or mtime changes. Runs
+ * with the other loaders, so changes are picked up on the next poll (every 10s) or nav_routes notification.
+ * A missing or invalid file keeps the last good certificate.
+ */
+export function wildcardFileLoader(store: CertStore, certFile: string, keyFile: string, log: (m: string) => void = (m) => console.error(m)): () => Promise<void> {
+  let seen = '';
+  let lastError = '';
+  return async () => {
+    let stamp: string;
+    try {
+      const [c, k] = await Promise.all([fs.promises.stat(certFile), fs.promises.stat(keyFile)]);
+      stamp = `${c.size}:${c.mtimeMs}:${k.size}:${k.mtimeMs}`;
+    } catch (err) {
+      const msg = `[edge] wildcard certificate files unreadable (${(err as Error).message}); ${store.platformSource() === 'files' ? 'keeping the last loaded certificate' : 'not loaded'}`;
+      if (msg !== lastError) log(msg);
+      lastError = msg;
+      return;
+    }
+    if (stamp === seen) return;
+    seen = stamp;
+    try {
+      const [cert, key] = await Promise.all([fs.promises.readFile(certFile, 'utf8'), fs.promises.readFile(keyFile, 'utf8')]);
+      const x = new X509Certificate(cert);
+      store.setPlatformFiles({ cert, key });
+      lastError = '';
+      log(`[edge] loaded wildcard certificate ${certFile} (${x.subjectAltName ?? x.subject}, expires ${new Date(x.validTo).toISOString()})`);
+    } catch (err) {
+      lastError = `[edge] invalid wildcard certificate files ${certFile} / ${keyFile}: ${(err as Error).message}; keeping the previous certificate`;
+      log(lastError);
+    }
+  };
+}
+
+/** Logs whenever the apps-domain certificate source changes; warns in production when only the dev certificate is left. */
+export function platformCertMonitor(store: CertStore, appsDomain: string, production: boolean, log: (m: string) => void = (m) => console.error(m)): () => Promise<void> {
+  let last: string | undefined;
+  return async () => {
+    const src = store.platformSource() ?? 'dev';
+    if (src === last) return;
+    last = src;
+    if (src === 'files') log(`[edge] *.${appsDomain}: serving the operator-supplied wildcard certificate`);
+    else if (src === 'acme') log(`[edge] *.${appsDomain}: serving the ACME wildcard certificate`);
+    else if (production) log(`[edge] WARNING: no wildcard certificate for *.${appsDomain}; falling back to the self-signed development certificate (browsers will warn). Configure NAV_DNS_PROVIDER (see Self-hosting > Platform domain & TLS).`);
   };
 }

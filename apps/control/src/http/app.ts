@@ -24,6 +24,7 @@ import { streamRoutes } from './routes/streams.ts';
 import { snapshotRoutes } from './routes/snapshots.ts';
 import { outboundWebhookRoutes } from './routes/outboundWebhooks.ts';
 import { auditRoutes, recordAudit } from './routes/audit.ts';
+import { platformRoutes } from './routes/platform.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
@@ -108,6 +109,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await envGroupRoutes(api);
       await blueprintRoutes(api);
       await webhookRoutes(api);
+      await platformRoutes(api);
     },
     { prefix: '/api/v1' },
   );

@@ -34,6 +34,17 @@ export const config = {
   artifactMaxBytes: int('NAV_ARTIFACT_MAX_MB', 4096) * 1048576,
   acmeDirectory: process.env.NAV_ACME_DIRECTORY ?? 'https://acme-staging-v02.api.letsencrypt.org/directory',
   acmeEmail: process.env.NAV_ACME_EMAIL ?? '',
+  /** Certificate for `*.<appsDomain>` + `<appsDomain>`: issued via ACME DNS-01 ('cloudflare') or supplied as files ('manual'). */
+  platformTls: {
+    dnsProvider: (process.env.NAV_DNS_PROVIDER ?? '').trim().toLowerCase(),
+    cloudflareApiToken: process.env.NAV_CLOUDFLARE_API_TOKEN ?? '',
+    certFile: process.env.NAV_WILDCARD_CERT_FILE ?? '',
+    keyFile: process.env.NAV_WILDCARD_KEY_FILE ?? '',
+    /** DNS-01 issuance runs in production when a provider is set; elsewhere only with NAV_PLATFORM_TLS=1. */
+    enabled: (process.env.NAV_PLATFORM_TLS ?? (process.env.NODE_ENV === 'production' ? '1' : '0')) === '1',
+  },
+  /** Comma-separated emails of platform administrators. Unset: the first user who signed up. */
+  adminEmails: (process.env.NAV_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean),
   github: {
     clientId: process.env.NAV_GITHUB_CLIENT_ID ?? '',
     clientSecret: process.env.NAV_GITHUB_CLIENT_SECRET ?? '',
@@ -58,8 +69,6 @@ export const config = {
       clientSecret: process.env.NAV_GOOGLE_CLIENT_SECRET ?? '',
     },
   },
-  /** NAV instance administrators: may manage sign-in providers. Unset: the first user ever created. */
-  adminEmails: (process.env.NAV_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean),
   /** OpenID Connect single sign-on for the listed email domains. */
   sso: {
     issuer: (process.env.NAV_SSO_ISSUER ?? '').replace(/\/+$/, ''),

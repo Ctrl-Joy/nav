@@ -504,7 +504,7 @@ nav domains verify <domainId>`,
       { type: 'h3', text: 'TLS' },
       {
         type: 'p',
-        text: "The edge terminates TLS and picks the certificate for each connection by SNI, reading from the certificate store in Postgres. Production uses Let's Encrypt through `NAV_ACME_DIRECTORY`. In development NAV uses a local CA and a self-signed wildcard certificate.",
+        text: "The edge terminates TLS and picks the certificate for each connection by SNI, reading from the certificate store in Postgres. Production uses Let's Encrypt through `NAV_ACME_DIRECTORY`, and NAV's own `<slug>.<appsDomain>` names share one wildcard certificate (see Self-hosting, Platform domain & TLS). In development NAV uses a local CA and a self-signed wildcard certificate.",
       },
     ],
   },
@@ -790,6 +790,43 @@ NAV_PUBLIC_PORT_SUFFIX=
 NAV_PUBLIC_SCHEME=https
 NAV_ACME_EMAIL=ops@example.com
 NAV_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory`,
+      },
+      { type: 'h3', text: 'Platform domain & TLS', id: 'platform-tls' },
+      {
+        type: 'p',
+        text: "Every service gets `<slug>.<NAV_APPS_DOMAIN>`. NAV covers all of them with one free Let's Encrypt wildcard certificate for `*.<NAV_APPS_DOMAIN>` and `<NAV_APPS_DOMAIN>`. Wildcards can only be validated through DNS (ACME DNS-01), so NAV needs to create a TXT record in your DNS zone.",
+      },
+      {
+        type: 'list',
+        items: [
+          "Buy a domain, for example `example.com`, and use it (or a subdomain such as `apps.example.com`) as `NAV_APPS_DOMAIN`.",
+          "Move the zone's DNS to Cloudflare (the free plan is enough) and add two A records pointing at the edge server's public IP: `@` and `*` for the apex, or `apps` and `*.apps` when you use a subdomain. Use DNS only (grey cloud) so the edge terminates TLS itself.",
+          "In Cloudflare, go to My Profile, API Tokens, Create Token, start from Edit zone DNS, and grant `Zone:DNS:Edit` for that zone only.",
+          "Set `NAV_DNS_PROVIDER=cloudflare` and `NAV_CLOUDFLARE_API_TOKEN=<token>` on the control plane, and optionally `NAV_ACME_EMAIL` for expiry notices.",
+        ],
+      },
+      {
+        type: 'code',
+        code: `NAV_APPS_DOMAIN=apps.example.com
+NAV_DNS_PROVIDER=cloudflare
+NAV_CLOUDFLARE_API_TOKEN=<token with Zone:DNS:Edit>
+NAV_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory`,
+      },
+      {
+        type: 'p',
+        text: "On startup the control plane checks for the certificate and queues an `issue_platform_cert` job when it is missing. The job finds the Cloudflare zone, adds the two `_acme-challenge` TXT values (one for the wildcard, one for the apex), waits until the zone's authoritative nameservers answer with both, completes the order and always deletes the records afterwards. The certificate is stored encrypted next to custom-domain certificates, the edge reloads it within seconds, and the scheduler renews it when fewer than 30 days remain. A failed attempt is retried after 6 hours. Custom domains keep their own certificates, which take precedence for their exact names.",
+      },
+      {
+        type: 'p',
+        text: "Let's Encrypt limits duplicate certificates and failed validations, so start with the staging directory (the default). Staging certificates are not trusted by browsers. Once the logs show `issued wildcard certificate`, set `NAV_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory` and restart the control plane, or call `POST /api/v1/platform/tls/renew` to issue the production certificate right away.",
+      },
+      {
+        type: 'p',
+        text: "Platform admins (the emails in `NAV_ADMIN_EMAILS`, or the first user who signed up) can see the issuer, expiry and last error with `GET /api/v1/platform/tls`. Issuance never runs in development unless `NAV_PLATFORM_TLS=1`; a production edge without the certificate logs a warning and serves its self-signed development certificate.",
+      },
+      {
+        type: 'p',
+        text: "Other DNS hosts: set `NAV_DNS_PROVIDER=manual`, obtain the wildcard yourself (for example with certbot and your DNS plugin) and point `NAV_WILDCARD_CERT_FILE` and `NAV_WILDCARD_KEY_FILE` at the PEM full chain and key on the edge server. The edge checks the files every 10 seconds and loads a renewed certificate without a restart; an unreadable or mismatched pair keeps the previous one.",
       },
       {
         type: 'p',

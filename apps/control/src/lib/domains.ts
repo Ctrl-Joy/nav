@@ -64,8 +64,8 @@ export async function issueCertificate(domainId: string, log: (m: string) => voi
   }
 }
 
-async function acmeIssue(domain: string, log: (m: string) => void) {
-  if (domain.startsWith('*.')) throw new Error('wildcard certificates require a DNS-01 challenge, which is not configured on this NAV installation');
+/** ACME client for config.acmeDirectory with the installation's account key (created on first use). */
+export async function acmeClient() {
   const acme = (await import('acme-client')).default;
   const accountKeyPath = path.join(config.dataDir, 'acme-account.pem');
   const { mkdir, writeFile } = await import('node:fs/promises');
@@ -76,7 +76,13 @@ async function acmeIssue(domain: string, log: (m: string) => void) {
     await mkdir(config.dataDir, { recursive: true });
     await writeFile(accountKeyPath, accountKey, { mode: 0o600 });
   }
-  const client = new acme.Client({ directoryUrl: config.acmeDirectory, accountKey });
+  return new acme.Client({ directoryUrl: config.acmeDirectory, accountKey });
+}
+
+async function acmeIssue(domain: string, log: (m: string) => void) {
+  if (domain.startsWith('*.')) throw new Error('wildcard certificates require a DNS-01 challenge, which is not configured on this NAV installation');
+  const acme = (await import('acme-client')).default;
+  const client = await acmeClient();
   const [key, csr] = await acme.crypto.createCsr({ altNames: [domain] });
   log(`requesting certificate for ${domain} from ${config.acmeDirectory}`);
   const cert = await client.auto({

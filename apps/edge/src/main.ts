@@ -6,7 +6,7 @@ import pg from 'pg';
 import { config } from '@nav/shared/config';
 import { decrypt } from '@nav/shared/crypto';
 import { DbRouteWatcher, RouteTable, routeLoader } from './routes.ts';
-import { CertStore, certLoader, ensureDevCerts } from './tls.ts';
+import { CertStore, certLoader, ensureDevCerts, platformCertMonitor, wildcardFileLoader } from './tls.ts';
 import { Metrics } from './metrics.ts';
 import { Edge } from './proxy.ts';
 
@@ -18,7 +18,8 @@ pool.on('error', (err) => log(`[edge] pg pool error: ${err.message}`));
 
 const table = new RouteTable(config.appsDomain);
 const dev = ensureDevCerts(config.dataDir, config.appsDomain);
-const certs = new CertStore({ cert: dev.cert, key: dev.key }, decrypt, log);
+const certs = new CertStore({ cert: dev.cert, key: dev.key }, decrypt, log, { appsDomain: config.appsDomain });
+const { certFile, keyFile } = config.platformTls;
 const metrics = new Metrics(pool, log);
 
 const edge = new Edge({
@@ -41,7 +42,13 @@ const edge = new Edge({
 const watcher = new DbRouteWatcher({
   pool,
   createListener: () => new pg.Client({ connectionString: config.databaseUrl, connectionTimeoutMillis: 5_000, keepAlive: true }),
-  loaders: [routeLoader(pool, table), certLoader(pool, certs)],
+  loaders: [
+    routeLoader(pool, table),
+    certLoader(pool, certs),
+    // Manual platform wildcard: re-stat'ed on every poll, reloaded when the files change.
+    ...(certFile && keyFile ? [wildcardFileLoader(certs, certFile, keyFile, log)] : []),
+    platformCertMonitor(certs, config.appsDomain, production, log),
+  ],
   log,
 });
 
@@ -69,7 +76,7 @@ async function main(): Promise<void> {
   await listen(httpServer, config.edgeHttpPort);
   await listen(httpsServer, config.edgeHttpsPort);
   log(`[edge] ${os.hostname()} listening http :${config.edgeHttpPort} https :${config.edgeHttpsPort} (apps domain ${config.appsDomain}, ${table.size} routes, ${certs.size} certs)`);
-  log(`[edge] local dev CA${dev.generated ? ' (generated)' : ''}: ${dev.caPath} — trust it to avoid TLS warnings for *.${config.appsDomain}`);
+  if (!certs.platformSource()) log(`[edge] local dev CA${dev.generated ? ' (generated)' : ''}: ${dev.caPath} — trust it to avoid TLS warnings for *.${config.appsDomain}`);
 }
 
 let shuttingDown = false;
