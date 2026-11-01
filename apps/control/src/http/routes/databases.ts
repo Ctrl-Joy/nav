@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { config } from '@nav/shared/config';
 import { decrypt, encrypt } from '@nav/shared/crypto';
 import { id } from '@nav/shared/ids';
-import { DATABASE_PLANS, slugify, type DatabaseCredentials } from '@nav/shared';
+import { DATABASE_PLANS, haAvailable, slugify, type DatabaseCredentials } from '@nav/shared';
 import { one, q, type Row } from '../../db/pool.ts';
 import { badRequest, changed, conflict, enqueue, notFound, recordEvent } from '../../lib/core.ts';
 import * as ser from '../../lib/serialize.ts';
@@ -20,7 +20,7 @@ const Cidr = z.object({
   description: z.string().max(200).default(''),
 });
 
-async function dbFor(req: FastifyRequest, min: 'viewer' | 'developer' | 'admin' = 'viewer') {
+export async function dbFor(req: FastifyRequest, min: 'viewer' | 'developer' | 'admin' = 'viewer') {
   const { row, role } = await scoped(req, 'databases', (req.params as { id: string }).id, min);
   if (row.status === 'deleting') throw notFound('database');
   return { db: row, role };
@@ -42,6 +42,12 @@ export function credentials(db: Row): DatabaseCredentials {
       : `postgresql://${enc(db.db_user)}:${enc(password)}@${host}:${port}/${db.db_name}`,
     externalUrl: `postgresql://${enc(db.db_user)}:${enc(password)}@${config.edgePublicIp}:${port}/${db.db_name}`,
     psqlCommand: `PGPASSWORD=${password} psql -h ${config.edgePublicIp} -p ${port} -U ${db.db_user} ${db.db_name}`,
+    pooledInternalUrl: db.pooler_enabled && db.pooler_port
+      ? db.driver === 'docker'
+        ? `postgresql://${enc(db.db_user)}:${enc(password)}@${db.slug}-pooler:6432/${db.db_name}`
+        : `postgresql://${enc(db.db_user)}:${enc(password)}@${host}:${db.pooler_port}/${db.db_name}`
+      : null,
+    pooledExternalUrl: db.pooler_enabled && db.pooler_port ? `postgresql://${enc(db.db_user)}:${enc(password)}@${config.edgePublicIp}:${db.pooler_port}/${db.db_name}` : null,
   };
 }
 
@@ -90,15 +96,28 @@ export async function databaseRoutes(app: FastifyInstance) {
 
   app.patch('/databases/:id', async (req) => {
     const { db } = await dbFor(req, 'developer');
-    const body = z.object({ name: z.string().trim().min(1).max(64).optional(), plan: z.string().optional(), ipAllowList: z.array(Cidr).max(50).optional(), diskGB: z.number().int().min(1).max(4096).optional() }).parse(req.body);
+    const body = z.object({
+      name: z.string().trim().min(1).max(64).optional(),
+      plan: z.string().optional(),
+      ipAllowList: z.array(Cidr).max(50).optional(),
+      diskGB: z.number().int().min(1).max(4096).optional(),
+      highAvailability: z.boolean().optional(),
+    }).parse(req.body);
     if (body.plan && !DATABASE_PLANS.some((p) => p.id === body.plan)) throw badRequest('unknown plan');
     if (body.diskGB && body.diskGB < db.disk_gb) throw badRequest('disk size can only be increased');
+    const ha = body.highAvailability ?? db.high_availability;
+    if (ha && !haAvailable(body.plan ?? db.plan)) {
+      throw conflict(body.highAvailability ? 'high availability is available on paid plans; upgrade the instance type first' : 'disable high availability before moving to the free plan');
+    }
+    const haChanged = body.highAvailability !== undefined && body.highAvailability !== db.high_availability;
+    if (haChanged && db.status !== 'available') throw conflict(`database is ${db.status}`);
     const row = await one(
       `UPDATE databases SET name = COALESCE($2, name), plan = COALESCE($3, plan), ip_allow_list = COALESCE($4, ip_allow_list),
-       disk_gb = COALESCE($5, disk_gb), updated_at = now() WHERE id = $1 RETURNING *`,
-      [db.id, body.name ?? null, body.plan ?? null, body.ipAllowList ? JSON.stringify(body.ipAllowList) : null, body.diskGB ?? null],
+       disk_gb = COALESCE($5, disk_gb), high_availability = COALESCE($6, high_availability), updated_at = now() WHERE id = $1 RETURNING *`,
+      [db.id, body.name ?? null, body.plan ?? null, body.ipAllowList ? JSON.stringify(body.ipAllowList) : null, body.diskGB ?? null, body.highAvailability ?? null],
     );
     if (body.ipAllowList || body.plan) await enqueue('db_reconfigure', { databaseId: db.id }, { concurrencyKey: `db:${db.id}` });
+    if (haChanged) await enqueue(body.highAvailability ? 'db_ha_enable' : 'db_ha_disable', { databaseId: db.id }, { concurrencyKey: `db:${db.id}` });
     await recordEvent({ workspaceId: db.workspace_id, databaseId: db.id, actorId: requireUser(req).id, kind: 'database_updated', data: { fields: Object.keys(body) } });
     return ser.database(row!);
   });
@@ -114,7 +133,20 @@ export async function databaseRoutes(app: FastifyInstance) {
   app.get('/databases/:id/credentials', async (req) => {
     const { db } = await dbFor(req, 'developer');
     if (db.status !== 'available' && db.status !== 'suspended') throw conflict(`database is ${db.status}`);
-    return credentials(db);
+    const creds = credentials(db);
+    const enc = encodeURIComponent;
+    const replicas = await q("SELECT * FROM db_replicas WHERE database_id = $1 AND role = 'replica' AND status = 'available' ORDER BY created_at", [db.id]);
+    creds.replicas = replicas.map((r) => ({
+      id: r.id,
+      name: r.name,
+      host: r.host,
+      port: r.port,
+      internalUrl: db.driver === 'docker'
+        ? `postgresql://${enc(db.db_user)}:${enc(creds.password)}@${db.slug}-${r.id}:5432/${db.db_name}`
+        : `postgresql://${enc(db.db_user)}:${enc(creds.password)}@${r.host}:${r.port}/${db.db_name}`,
+      externalUrl: `postgresql://${enc(db.db_user)}:${enc(creds.password)}@${config.edgePublicIp}:${r.port}/${db.db_name}`,
+    }));
+    return creds;
   });
 
   for (const action of ['suspend', 'resume', 'restart'] as const) {

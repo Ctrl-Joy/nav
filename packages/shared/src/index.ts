@@ -43,6 +43,24 @@ export const DATABASE_PLANS: Plan[] = [
   { id: 'pro-8gb', name: 'Pro 8 GB', cpu: 2, memoryMB: 8192, priceMonthly: 100, kind: 'database' },
 ];
 
+/** Point-in-time recovery window per database plan, in days (0: free databases have no PITR). */
+export function pitrRetentionDays(plan: string): number {
+  if (plan === 'free') return 0;
+  return plan.startsWith('pro') ? 7 : 3;
+}
+
+/** High availability (a hot standby with automatic failover) is offered on paid database plans. */
+export const haAvailable = (plan: string): boolean => plan !== 'free';
+
+/** Extensions users may CREATE / DROP themselves (postgis only when installed on the node). */
+export const PG_EXTENSION_ALLOW_LIST = [
+  'pgcrypto', 'uuid-ossp', 'citext', 'hstore', 'pg_trgm', 'btree_gin', 'btree_gist', 'unaccent', 'intarray',
+  'tablefunc', 'fuzzystrmatch', 'ltree', 'cube', 'earthdistance', 'pg_stat_statements', 'postgis',
+] as const;
+
+/** Newest PostgreSQL major version NAV knows how to run. */
+export const PG_LATEST_VERSION = 18;
+
 /** Key Value (Redis-compatible) plans: memoryMB is the instance's maxmemory. */
 export const KEY_VALUE_PLANS: Plan[] = [
   { id: 'free', name: 'Free', cpu: 0.1, memoryMB: 25, priceMonthly: 0, kind: 'database' },
@@ -272,10 +290,17 @@ export interface Database {
   dbName: string;
   dbUser: string;
   diskGB: number;
-  status: 'creating' | 'available' | 'suspended' | 'failed' | 'deleting' | 'restoring';
+  status: 'creating' | 'available' | 'suspended' | 'failed' | 'deleting' | 'restoring' | 'upgrading';
   internalUrl: string | null;          // revealed only via GET /databases/:id/credentials
   externalUrl: string | null;
   ipAllowList: { cidr: string; description: string }[];
+  /** A hot standby is kept in sync and promoted automatically if the primary stops responding. */
+  highAvailability: boolean;
+  /** PgBouncer runs in front of the database (transaction pooling). */
+  connectionPooling: boolean;
+  pooledExternalUrl: string | null;    // masked like externalUrl
+  /** Set on databases created by "Recover to a point in time". */
+  recoveredFrom: { databaseId: string; targetTime: string } | null;
   createdAt: string;
 }
 
@@ -288,6 +313,11 @@ export interface DatabaseCredentials {
   internalUrl: string;
   externalUrl: string;
   psqlCommand: string;
+  /** Through PgBouncer (transaction pooling), when connection pooling is enabled. */
+  pooledInternalUrl?: string | null;
+  pooledExternalUrl?: string | null;
+  /** Read-only connection strings of the read replicas. */
+  replicas?: { id: string; name: string; host: string; port: number; internalUrl: string; externalUrl: string }[];
 }
 
 export interface DbBackup {
@@ -298,6 +328,96 @@ export interface DbBackup {
   sizeBytes: number | null;
   createdAt: string;
   finishedAt: string | null;
+}
+
+/** GET /databases/:id/recovery — the point-in-time recovery window. */
+export interface DbRecoveryWindow {
+  enabled: boolean;
+  retentionDays: number;
+  /** Earliest / latest restorable instants (null when nothing is restorable yet). */
+  earliest: string | null;
+  latest: string | null;
+  /** Why recovery is unavailable, e.g. free plan or no base backup yet. */
+  reason: string | null;
+  lastArchivedAt: string | null;
+}
+
+export interface DbReplica {
+  id: string;
+  databaseId: string;
+  role: 'replica' | 'standby';
+  name: string;
+  status: 'creating' | 'available' | 'failed' | 'deleting';
+  host: string | null;
+  port: number | null;
+  externalUrl: string | null;          // masked; full URL via /credentials
+  /** Streaming state seen from the primary: streaming, catchup, disconnected. */
+  state: string | null;
+  lagBytes: number | null;
+  lagSeconds: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface DbPooler {
+  enabled: boolean;
+  /** False when the node cannot run PgBouncer (install it, or use the docker driver). */
+  available: boolean;
+  mode: 'transaction';
+  port: number | null;
+  pooledExternalUrl: string | null;    // masked
+  reason: string | null;
+}
+
+export interface DbExtension {
+  name: string;
+  defaultVersion: string | null;
+  installedVersion: string | null;
+  comment: string | null;
+  /** pg_stat_statements must be preloaded; false until the database restarts with it. */
+  ready: boolean;
+}
+
+export interface DbOperation {
+  id: string;
+  databaseId: string;
+  kind: 'upgrade' | 'repack' | 'recover' | 'failover';
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  data: Record<string, unknown>;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface DbUpgradeInfo {
+  currentVersion: number;
+  /** Major versions this database can be upgraded to on its node, with the method that would be used. */
+  targets: { version: number; method: 'pg_upgrade' | 'dump_restore' }[];
+  reason: string | null;
+}
+
+export interface DbSlowQuery {
+  queryId: string;
+  query: string;
+  calls: number;
+  totalMs: number;
+  meanMs: number;
+  rows: number;
+  cacheHitRatio: number | null;
+}
+
+export interface DbTableStat {
+  schema: string;
+  table: string;
+  totalBytes: number;
+  tableBytes: number;
+  indexBytes: number;
+  liveTuples: number;
+  deadTuples: number;
+  /** Estimated reclaimable space (heuristic from row width and tuple count). */
+  bloatBytes: number | null;
+  lastVacuum: string | null;
+  lastAutovacuum: string | null;
 }
 
 export interface Blueprint {

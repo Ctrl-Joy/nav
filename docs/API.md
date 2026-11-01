@@ -171,7 +171,7 @@ Injected variables at runtime: `PORT`, `NAV=true`, `NAV_SERVICE_ID`, `NAV_SERVIC
 |---|---|---|
 | GET | `/workspaces/:ws/databases` | `Page<Database>` |
 | POST | `/workspaces/:ws/databases` | `{name, plan?, pgVersion?, databaseName?, user?, environmentId?, diskGB?}` → `Database` (status `creating`) |
-| GET/PATCH/DELETE | `/databases/:id` | PATCH `{name?, plan?, ipAllowList?, diskGB?}` |
+| GET/PATCH/DELETE | `/databases/:id` | PATCH `{name?, plan?, ipAllowList?, diskGB?, highAvailability?}` |
 | GET | `/databases/:id/credentials` | `DatabaseCredentials` (admins/developers only) |
 | POST | `/databases/:id/suspend`, `/resume`, `/restart` | |
 | GET | `/databases/:id/backups` | `Page<DbBackup>` |
@@ -181,6 +181,28 @@ Injected variables at runtime: `PORT`, `NAV=true`, `NAV_SERVICE_ID`, `NAV_SERVIC
 | GET | `/databases/:id/logs` + `/logs/stream` | |
 | GET | `/databases/:id/metrics` | `?range=` → `{cpu, memoryMB, connections, sizeBytes}` series |
 | POST | `/databases/:id/query` | `{sql}` → `{columns, rows, rowCount, durationMs}` (developers+; read-write; 5s timeout; 1000 row cap) |
+| GET | `/databases/:id/recovery` | `DbRecoveryWindow` — point-in-time recovery window `{enabled, retentionDays, earliest, latest, reason}` (free: off; basic: 3 days; pro: 7 days) |
+| POST | `/databases/:id/recover` | `{targetTime, name?}` → `202 Database`: a NEW database restored from the newest base backup before `targetTime`, WAL replayed to `recovery_target_time`, then promoted |
+| GET/POST | `/databases/:id/replicas` | `Page<DbReplica>` with live replication lag; POST `{name?}` creates a streaming read replica (paid plans, max 5) |
+| DELETE | `/databases/:id/replicas/:replicaId` | the HA standby is removed with `PATCH {highAvailability:false}` instead |
+| GET/POST/DELETE | `/databases/:id/pooler` | `DbPooler`; POST enables PgBouncer (transaction mode) — `409` when PgBouncer is not installed on the node (`NAV_PGBOUNCER` / PATH) |
+| GET/POST | `/databases/:id/extensions` | allow-listed extensions from `pg_available_extensions`; POST `{name}` runs `CREATE EXTENSION … CASCADE` |
+| DELETE | `/databases/:id/extensions/:name` | `?cascade=true` to drop dependent objects (409 otherwise) |
+| GET/POST | `/databases/:id/upgrade` | `DbUpgradeInfo` (targets installed on the node and method); POST `{version}` (admins) → `202 DbOperation` |
+| GET | `/databases/:id/insights/slow-queries` | top 20 statements by total time (`pg_stat_statements`); POST `…/reset` |
+| GET | `/databases/:id/insights/tables` | sizes, dead rows, estimated bloat |
+| POST | `/databases/:id/repack` | `{schema?, table}` (admins) → `202 DbOperation`: pg_repack if installed, else `VACUUM (FULL, ANALYZE)` (locks the table) |
+| GET | `/databases/:id/operations` | recent upgrades / repacks / recoveries / failovers |
+
+High availability: with `highAvailability: true` a hot standby streams from the primary on the same node. If the primary
+does not answer for `NAV_PG_FAILOVER_SECONDS` (default 30), the agent fences it, promotes the standby, moves it into the
+database's data directory and restarts it **on the primary's port**, so connection strings keep working. If that port
+cannot be bound the standby keeps its own port and the database's external port changes (recorded in the
+`database_failover` event and shown in the dashboard). A new standby is then built. The standby lives on the same node
+as the primary: it protects against PostgreSQL crashes and data-directory failures, not against losing the node.
+Tools: embedded-postgres ships only `initdb`/`pg_ctl`/`postgres`; set `NAV_PG_BIN_DIRS` to the bin directory of a full
+PostgreSQL install (or put it on PATH) for `pg_basebackup`, `pg_upgrade`, `pg_dump`/`pg_restore` and other major versions.
+Without `pg_basebackup`, replicas are cloned with an online base backup over a replication slot.
 
 ## Blueprints (Infrastructure as code: `nav.yaml`)
 

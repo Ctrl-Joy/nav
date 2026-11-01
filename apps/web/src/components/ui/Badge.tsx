@@ -67,6 +67,7 @@ const STATUS: Record<string, StatusDef> = {
   available: { tone: 'success', label: 'Available' },
   deleting: { tone: 'danger', label: 'Deleting', pulse: true },
   restoring: { tone: 'info', label: 'Restoring', pulse: true },
+  upgrading: { tone: 'info', label: 'Upgrading', pulse: true },
   // instance
   starting: { tone: 'warning', label: 'Starting', pulse: true },
   healthy: { tone: 'success', label: 'Healthy' },

@@ -12,6 +12,7 @@ import { authRoutes } from './routes/auth.ts';
 import { workspaceRoutes } from './routes/workspaces.ts';
 import { serviceRoutes } from './routes/services.ts';
 import { databaseRoutes } from './routes/databases.ts';
+import { databaseFeatureRoutes } from './routes/databaseFeatures.ts';
 import { envGroupRoutes } from './routes/envgroups.ts';
 import { blueprintRoutes } from './routes/blueprints.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
@@ -111,6 +112,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await workspaceRoutes(api);
       await serviceRoutes(api);
       await databaseRoutes(api);
+      await databaseFeatureRoutes(api);
       await envGroupRoutes(api);
       await blueprintRoutes(api);
       await webhookRoutes(api);

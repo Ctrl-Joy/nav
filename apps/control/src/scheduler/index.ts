@@ -152,7 +152,10 @@ async function housekeepingTick(): Promise<void> {
   await expirePreviewEnvironments();
 }
 
-/** Daily automatic database backups (keep 7) and certificate renewals (30 days before expiry). */
+/**
+ * Daily automatic database backups (keep 8: they are also the base backups of a 7-day point-in-time recovery
+ * window) and certificate renewals (30 days before expiry).
+ */
 async function dailyTick(): Promise<void> {
   const dbs = await q(
     `SELECT d.id FROM databases d WHERE d.status = 'available' AND d.plan <> 'free'
@@ -165,7 +168,7 @@ async function dailyTick(): Promise<void> {
   }
   await q(
     `DELETE FROM db_backups WHERE kind = 'automatic' AND id IN (
-       SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY database_id ORDER BY created_at DESC) AS rn FROM db_backups WHERE kind = 'automatic') x WHERE rn > 7)`,
+       SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY database_id ORDER BY created_at DESC) AS rn FROM db_backups WHERE kind = 'automatic') x WHERE rn > 8)`,
   );
   // Daily disk snapshots for services with a persistent disk; keep the latest 7 automatic ones.
   const disks = await q("SELECT s.* FROM services s WHERE s.disk IS NOT NULL AND NOT s.suspended AND s.current_deploy_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM disk_snapshots d WHERE d.service_id = s.id AND d.kind = 'automatic' AND d.created_at > now() - interval '23 hours')");

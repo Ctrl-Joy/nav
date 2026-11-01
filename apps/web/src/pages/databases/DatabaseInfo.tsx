@@ -100,6 +100,21 @@ export function DatabaseInfoTab() {
             <Row label="PSQL command">
               <SecretValue value={creds.data.psqlCommand} />
             </Row>
+            {creds.data.pooledInternalUrl && (
+              <Row label="Pooled internal URL">
+                <SecretValue value={creds.data.pooledInternalUrl} />
+              </Row>
+            )}
+            {creds.data.pooledExternalUrl && (
+              <Row label="Pooled external URL">
+                <SecretValue value={creds.data.pooledExternalUrl} />
+              </Row>
+            )}
+            {creds.data.replicas?.map((r) => (
+              <Row key={r.id} label={`Read replica: ${r.name}`}>
+                <SecretValue value={r.externalUrl} />
+              </Row>
+            ))}
           </dl>
         )}
       </Card>

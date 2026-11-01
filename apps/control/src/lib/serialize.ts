@@ -2,7 +2,7 @@
 import { config, publicUrlFor } from '@nav/shared/config';
 import type { Row } from '../db/pool.ts';
 import type {
-  ApiKey, Blueprint, CustomDomain, Database, DbBackup, Deploy, Event, Instance, LogLine, Run, Service,
+  ApiKey, Blueprint, CustomDomain, Database, DbBackup, DbOperation, DbReplica, Deploy, Event, Instance, LogLine, Run, Service,
 } from '@nav/shared';
 
 export function service(r: Row): Service {
@@ -156,8 +156,35 @@ export function database(r: Row): Database {
     internalUrl: r.status === 'available' ? `postgresql://${r.db_user}:********@${r.slug}:5432/${r.db_name}` : null,
     externalUrl: r.status === 'available' && r.port ? `postgresql://${r.db_user}:********@${config.edgePublicIp}:${r.port}/${r.db_name}` : null,
     ipAllowList: r.ip_allow_list,
+    highAvailability: Boolean(r.high_availability),
+    connectionPooling: Boolean(r.pooler_enabled),
+    pooledExternalUrl: r.status === 'available' && r.pooler_enabled && r.pooler_port ? `postgresql://${r.db_user}:********@${config.edgePublicIp}:${r.pooler_port}/${r.db_name}` : null,
+    recoveredFrom: r.recovered_from ?? null,
     createdAt: r.created_at,
   };
+}
+
+/** Lag fields come from the primary's pg_stat_replication (see GET /databases/:id/replicas). */
+export function replica(r: Row, db: Row, live?: { state: string; lagBytes: number | null; lagSeconds: number | null }): DbReplica {
+  return {
+    id: r.id,
+    databaseId: r.database_id,
+    role: r.role,
+    name: r.name,
+    status: r.status,
+    host: r.host,
+    port: r.port,
+    externalUrl: r.status === 'available' && r.port ? `postgresql://${db.db_user}:********@${config.edgePublicIp}:${r.port}/${db.db_name}` : null,
+    state: r.status === 'available' ? live?.state ?? 'disconnected' : null,
+    lagBytes: live?.lagBytes ?? null,
+    lagSeconds: live?.lagSeconds ?? null,
+    error: r.error,
+    createdAt: r.created_at,
+  };
+}
+
+export function dbOperation(r: Row): DbOperation {
+  return { id: r.id, databaseId: r.database_id, kind: r.kind, status: r.status, data: r.data, error: r.error, createdAt: r.created_at, finishedAt: r.finished_at };
 }
 
 export function backup(r: Row): DbBackup {

@@ -9,7 +9,11 @@ import { one, pool, q } from '../db/pool.ts';
 import { enqueue } from '../lib/core.ts';
 import { migrate } from '../db/migrate.ts';
 import { notify } from '../db/pool.ts';
-import { handleDbBackup, handleDbDelete, handleDbProvision, handleDbReconfigure, handleDbRestart, handleDbRestore, handleDbResume, handleDbSuspend, monitorDatabases, recoverDatabases } from './databases.ts';
+import { handleDbBackup, handleDbDelete, handleDbProvision, handleDbReconfigure, handleDbRecover, handleDbRestart, handleDbRestore, handleDbResume, handleDbSuspend, monitorDatabases, recoverDatabases } from './databases.ts';
+import {
+  detectCapabilities, handleDbHaDisable, handleDbHaEnable, handleDbPoolerStart, handleDbPoolerStop, handleDbRepack, handleDbReplicaCreate, handleDbReplicaDelete,
+  handleDbUpgrade, monitorHighAvailability, recoverPoolers, recoverReplicas,
+} from './pgfeatures.ts';
 import { handleBlueprintPreview, handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
 import { CONTROL_JOBS } from '../scheduler/jobs.ts';
 import { liveNodes } from './cluster.ts';
@@ -74,6 +78,15 @@ const HANDLERS: Record<string, Handler> = {
   db_delete: handleDbDelete,
   db_backup: handleDbBackup,
   db_restore: handleDbRestore,
+  db_recover: handleDbRecover,
+  db_replica_create: handleDbReplicaCreate,
+  db_replica_delete: handleDbReplicaDelete,
+  db_ha_enable: handleDbHaEnable,
+  db_ha_disable: handleDbHaDisable,
+  db_pooler_start: handleDbPoolerStart,
+  db_pooler_stop: handleDbPoolerStop,
+  db_upgrade: handleDbUpgrade,
+  db_repack: handleDbRepack,
   disk_snapshot: handleDiskSnapshot,
   disk_restore: handleDiskRestore,
   kv_provision: handleKvProvision,
@@ -158,7 +171,13 @@ async function main() {
   await q("UPDATE runs SET status = 'failed', finished_at = now() WHERE id IN (SELECT payload->>'runId' FROM jobs WHERE kind = 'run' AND status = 'running' AND locked_by = $1)", [nid]);
   await q("UPDATE jobs SET status = CASE WHEN attempts < max_attempts AND kind NOT IN ('deploy','run') THEN 'queued' ELSE 'failed' END, locked_by = NULL, error = 'agent restarted' WHERE status = 'running' AND locked_by = $1", [nid]);
   await recoverDatabases(ctx);
+  await recoverReplicas(ctx).catch((e) => console.error('[agent] replica recovery', e.message));
+  await recoverPoolers(ctx).catch((e) => console.error('[agent] pooler recovery', e.message));
   await recoverKeyValues(ctx).catch((e) => console.error('[agent] key value recovery', e.message));
+  // Installed PostgreSQL versions / tools and PgBouncer, for the API (upgrade targets, pooling availability).
+  const reportCapabilities = async () => q('UPDATE nodes SET capabilities = $2 WHERE id = $1', [nid, await detectCapabilities(driver.name)]);
+  await reportCapabilities().catch((e) => console.error('[agent] capability detection', e.message));
+  setInterval(() => reportCapabilities().catch(() => {}), 5 * 60_000);
   // Process instances do not survive an agent restart: let the cluster bring their services back to size.
   for (const r of await q("SELECT DISTINCT service_id FROM instances WHERE node_id = $1 AND stopped_at > now() - interval '1 minute'", [nid])) {
     await enqueue('scale', { serviceId: r.service_id }, { concurrencyKey: `svc:${r.service_id}` });
@@ -176,6 +195,7 @@ async function main() {
   setInterval(() => instances.syncLbs().catch((e) => console.error('[agent] lb sync', e.message)), 3_000);
   setInterval(() => instances.sample().catch((e) => console.error('[agent] sample', e.message)), 15_000);
   setInterval(() => monitorDatabases(ctx).catch(() => {}), 5_000);
+  setInterval(() => monitorHighAvailability(ctx).catch((e) => console.error('[agent] ha monitor', e.message)), 5_000);
 
   // Job loop: two lanes, each with its own concurrency.
   const running = { work: 0, node: 0 };
