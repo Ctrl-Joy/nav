@@ -11,6 +11,7 @@ import { authenticate } from './auth.ts';
 import { authRoutes } from './routes/auth.ts';
 import { workspaceRoutes } from './routes/workspaces.ts';
 import { serviceRoutes } from './routes/services.ts';
+import { workflowRoutes } from './routes/workflows.ts';
 import { databaseRoutes } from './routes/databases.ts';
 import { databaseFeatureRoutes } from './routes/databaseFeatures.ts';
 import { envGroupRoutes } from './routes/envgroups.ts';
@@ -59,6 +60,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.decorateRequest('user', null);
   app.decorateRequest('authKind', null);
+  app.decorateRequest('tokenWorkspaceId', null);
 
   app.addHook('onRequest', async (req, reply) => {
     reply.header('x-content-type-options', 'nosniff');
@@ -113,6 +115,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await snapshotRoutes(api);
       await workspaceRoutes(api);
       await serviceRoutes(api);
+      await workflowRoutes(api);
       await databaseRoutes(api);
       await databaseFeatureRoutes(api);
       await envGroupRoutes(api);

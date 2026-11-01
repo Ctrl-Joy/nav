@@ -24,6 +24,7 @@ const STREAM_CLASS: Record<LogLine['stream'], string> = {
   runtime: 'text-[#3ddc84]',
   cron: 'text-[#c792ea]',
   job: 'text-[#c792ea]',
+  workflow: 'text-[#c792ea]',
   system: 'text-[#2ee6f6]',
 };
 

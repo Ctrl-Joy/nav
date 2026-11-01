@@ -14,7 +14,7 @@
   "scripts": {
     "dev": "node scripts/dev.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test \"apps/*/test/**/*.test.ts\""
+    "test": "node --test \"apps/*/test/**/*.test.ts\" \"packages/*/test/**/*.test.js\""
   },
   "devDependencies": {
     "@types/node": "^26.6.6"

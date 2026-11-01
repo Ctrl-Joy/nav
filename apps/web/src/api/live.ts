@@ -54,6 +54,13 @@ export function useWorkspaceLiveUpdates(ws: string | undefined): StreamState {
           case 'run':
             if (serviceId) inv(qk.serviceRuns(serviceId));
             break;
+          case 'workflow_run':
+            inv(qk.workflowRun(id));
+            if (serviceId) {
+              inv(qk.workflow(serviceId));
+              inv(qk.workflowRuns(serviceId));
+            }
+            break;
           case 'blueprint':
             inv(qk.blueprints(ws));
             inv(qk.blueprint(id));

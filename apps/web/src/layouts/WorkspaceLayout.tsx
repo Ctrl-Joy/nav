@@ -31,6 +31,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   UserRound,
+  Workflow,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -68,6 +69,7 @@ const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
     items: [
       { to: '', label: 'Overview', icon: LayoutGrid, end: true },
       { to: 'projects', label: 'Projects', icon: FolderKanban },
+      { to: 'workflows', label: 'Workflows', icon: Workflow },
       { to: 'blueprints', label: 'Blueprints', icon: FileStack },
       { to: 'env-groups', label: 'Environment Groups', icon: Boxes },
     ],
@@ -103,6 +105,7 @@ function navGroups(ctx: WorkspaceCtx) {
 const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   '': { label: 'Overview', icon: LayoutGrid },
   projects: { label: 'Projects', icon: FolderKanban },
+  workflows: { label: 'Workflows', icon: Workflow },
   blueprints: { label: 'Blueprints', icon: FileStack },
   'env-groups': { label: 'Environment Groups', icon: Boxes },
   databases: { label: 'Postgres', icon: Database },

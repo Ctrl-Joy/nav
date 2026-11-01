@@ -1,0 +1,11 @@
+{
+  "name": "nav-example-workflows",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@nav/workflows": "file:./vendor/nav-workflows.tgz"
+  }
+}

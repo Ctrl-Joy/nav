@@ -18,7 +18,7 @@ export const forbidden = (msg = 'insufficient permissions') => new HttpError(403
 export const badRequest = (msg: string, details?: unknown) => new HttpError(400, 'bad_request', msg, details);
 export const conflict = (msg: string) => new HttpError(409, 'conflict', msg);
 
-export type Entity = 'service' | 'deploy' | 'database' | 'key_value' | 'instance' | 'run' | 'domain' | 'blueprint' | 'env_group' | 'project';
+export type Entity = 'service' | 'deploy' | 'database' | 'key_value' | 'instance' | 'run' | 'workflow_run' | 'domain' | 'blueprint' | 'env_group' | 'project';
 
 /** Tell dashboards something changed (fan-out via LISTEN nav_changes). */
 export async function changed(workspaceId: string, entity: Entity, id: string, serviceId?: string | null): Promise<void> {

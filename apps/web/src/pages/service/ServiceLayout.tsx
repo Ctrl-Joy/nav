@@ -111,7 +111,14 @@ export function ServiceLayout() {
   };
 
   const base = `/w/${ws}/services/${service.id}`;
-  const tabs = [
+  const tabs = service.type === 'workflow' ? [
+    { to: `${base}/runs`, label: 'Runs' },
+    { to: `${base}/tasks`, label: 'Tasks' },
+    { to: base, label: 'Events', end: true },
+    { to: `${base}/logs`, label: 'Logs' },
+    { to: `${base}/environment`, label: 'Environment' },
+    { to: `${base}/settings`, label: 'Settings' },
+  ] : [
     { to: base, label: 'Events', end: true },
     { to: `${base}/logs`, label: 'Logs' },
     { to: `${base}/metrics`, label: 'Metrics' },
@@ -197,7 +204,7 @@ export function ServiceLayout() {
                 </DropdownItem>
               </Dropdown>
             </div>
-            {!service.suspended && service.type !== 'static' && service.type !== 'cron' && (
+            {!service.suspended && service.type !== 'static' && service.type !== 'cron' && service.type !== 'workflow' && (
               <Button icon={<RefreshCw className="size-3.5" />} onClick={() => doAction('restart')} disabled={action.isPending}>
                 Restart
               </Button>

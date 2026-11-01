@@ -71,6 +71,7 @@ export async function createService(opts: CreateOptions): Promise<{ service: Row
     validateCron(i.cronSchedule);
     if (!i.startCommand && runtime !== 'image' && runtime !== 'docker') throw badRequest('a command (startCommand) is required for cron jobs');
   }
+  if (type === 'workflow' && i.disk) throw badRequest('workflows cannot attach a persistent disk (each run is a fresh one-off process)');
   if (i.port != null && (i.port < 1 || i.port > 65535 || [18012, 18013, 19099].includes(i.port))) throw badRequest('invalid or reserved port');
   if (i.healthCheckPath && !i.healthCheckPath.startsWith('/')) throw badRequest('healthCheckPath must start with /');
   if (i.rootDir && (i.rootDir.includes('..') || /^[/\\]/.test(i.rootDir))) throw badRequest('rootDir must be a relative path inside the repository');
@@ -108,7 +109,7 @@ export async function createService(opts: CreateOptions): Promise<{ service: Row
       [serviceId, opts.workspaceId, i.environmentId ?? null, i.name.trim(), slug, type, runtime, repoUrl, branch, (i.rootDir ?? '').replace(/^\.\/?/, '').replace(/\/$/, ''),
         installationId, i.imageUrl ?? null, i.buildCommand || null, i.startCommand || null, i.preDeployCommand || null, i.dockerfilePath ?? 'Dockerfile',
         i.dockerContext ?? '.', i.publishPath || null, type === 'web' ? i.healthCheckPath || null : null, i.port ?? null, plan,
-        type === 'cron' ? 1 : instanceCount, i.autoDeploy ?? 'commit', type === 'cron' ? i.cronSchedule : null, i.disk ?? null,
+        type === 'cron' || type === 'workflow' ? 1 : instanceCount, i.autoDeploy ?? 'commit', type === 'cron' ? i.cronSchedule : null, i.disk ?? null,
         i.previews ?? { mode: 'off', expireAfterDays: 7 }, opts.parentServiceId ?? null, opts.prNumber ?? null, randomBytes(16).toString('hex')],
     );
     await replaceEnv(c, 'service', serviceId, i.envVars ?? []);

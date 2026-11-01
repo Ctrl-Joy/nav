@@ -2,8 +2,52 @@
 import { config, publicUrlFor } from '@nav/shared/config';
 import type { Row } from '../db/pool.ts';
 import type {
-  ApiKey, Blueprint, CustomDomain, Database, DbBackup, DbOperation, DbReplica, Deploy, Event, Instance, LogLine, Run, Service,
+  ApiKey, Blueprint, CustomDomain, Database, DbBackup, DbOperation, DbReplica, Deploy, Event, Instance, LogLine, Run, Service, WorkflowRun, WorkflowStep, WorkflowTask,
 } from '@nav/shared';
+
+export function workflowTask(r: Row): WorkflowTask {
+  return {
+    name: r.name,
+    retries: r.retries,
+    timeoutSeconds: Number(r.timeout_s),
+    backoffSeconds: Number(r.backoff_s),
+    maxBackoffSeconds: Number(r.max_backoff_s),
+    description: r.description,
+    deployId: r.deploy_id,
+  };
+}
+
+export function workflowRun(r: Row): WorkflowRun {
+  return {
+    id: r.id,
+    workflowId: r.service_id,
+    deployId: r.deploy_id,
+    task: r.task,
+    status: r.status,
+    input: r.input ?? null,
+    output: r.output ?? null,
+    error: r.error,
+    attempts: r.attempts,
+    maxAttempts: r.max_attempts,
+    timeoutSeconds: Number(r.timeout_s),
+    parentRunId: r.parent_run_id,
+    rootRunId: r.root_run_id,
+    depth: r.depth,
+    idempotencyKey: r.idempotency_key,
+    trigger: r.trigger,
+    retryOf: r.retry_of,
+    executions: r.executions ?? [],
+    nextAttemptAt: r.next_attempt_at,
+    wakeAt: r.wake_at,
+    createdAt: r.created_at,
+    startedAt: r.started_at,
+    finishedAt: r.finished_at,
+  };
+}
+
+export function workflowStep(r: Row): WorkflowStep {
+  return { seq: r.seq, kind: r.kind, task: r.task, childRunId: r.child_run_id, until: r.until };
+}
 
 export function service(r: Row): Service {
   const isPublic = r.type === 'web' || r.type === 'static';

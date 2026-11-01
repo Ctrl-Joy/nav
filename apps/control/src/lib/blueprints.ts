@@ -25,7 +25,7 @@ const EnvEntry = z.union([
 ]);
 
 const ServiceSpec = z.object({
-  type: z.enum(['web', 'private', 'pserv', 'worker', 'cron', 'static']).transform((t) => (t === 'pserv' ? 'private' : t) as 'web' | 'private' | 'worker' | 'cron' | 'static'),
+  type: z.enum(['web', 'private', 'pserv', 'worker', 'cron', 'static', 'workflow']).transform((t) => (t === 'pserv' ? 'private' : t) as 'web' | 'private' | 'worker' | 'cron' | 'static' | 'workflow'),
   name: z.string().min(1).max(64),
   runtime: z.enum(['auto', 'node', 'python', 'go', 'ruby', 'bun', 'docker', 'image', 'static']).optional(),
   repo: z.string().optional(),

@@ -1,7 +1,7 @@
 # NAV
 
 A self-hostable platform-as-a-service: connect a Git repo and NAV builds it, runs it in isolated instances behind a
-TLS-terminating load-balancing edge, and gives you logs, metrics, scaling, rollbacks, cron jobs, managed PostgreSQL,
+TLS-terminating load-balancing edge, and gives you logs, metrics, scaling, rollbacks, cron jobs, durable workflows, managed PostgreSQL,
 custom domains, PR previews and infrastructure-as-code (`nav.yaml`).
 
 | Part | Path | What it does |
@@ -37,7 +37,7 @@ To try deploys without GitHub, serve the bundled example apps over local Git sma
 node scripts/git-serve.ts
 ```
 
-Then create a service from `http://localhost:9420/node-web.git` (also `static-site`, `worker`, `cron-job`, and
+Then create a service from `http://localhost:9420/node-web.git` (also `static-site`, `worker`, `cron-job`, `workflows` as a Workflow, and
 `examples.git` with a `nav.yaml` blueprint).
 
 ## Tests

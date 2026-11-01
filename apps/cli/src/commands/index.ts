@@ -13,6 +13,7 @@ import { openCommands } from './open.ts';
 import { serviceCommands } from './services.ts';
 import { sandboxCommands } from './sandbox.ts';
 import { sshCommands } from './ssh.ts';
+import { workflowCommands } from './workflows.ts';
 import { workspaceCommands } from './workspaces.ts';
 
 export const commands: CommandDef[] = [
@@ -25,6 +26,7 @@ export const commands: CommandDef[] = [
   ...domainCommands,
   ...dbCommands,
   ...jobCommands,
+  ...workflowCommands,
   ...blueprintCommands,
   ...metricsCommands,
   ...openCommands,

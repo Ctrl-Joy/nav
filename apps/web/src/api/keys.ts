@@ -75,6 +75,12 @@ export const qk = {
   keyValueCredentials: (id: string) => ['key-value', id, 'credentials'] as const,
   keyValueLogs: (id: string) => ['key-value', id, 'logs'] as const,
 
+  workflows: (ws: string) => ['ws', ws, 'workflows'] as const,
+  workflow: (id: string) => ['workflow', id] as const,
+  workflowRuns: (id: string, f?: Record<string, unknown>) => (f ? (['workflow', id, 'runs', f] as const) : (['workflow', id, 'runs'] as const)),
+  workflowRun: (id: string) => ['workflow-run', id] as const,
+  workflowRunLogs: (id: string) => ['workflow-run', id, 'logs'] as const,
+
   envGroup: (id: string) => ['env-group', id] as const,
   blueprint: (id: string) => ['blueprint', id] as const,
   blueprintPreviews: (id: string) => ['blueprint', id, 'previews'] as const,

@@ -1,7 +1,7 @@
 // Shared contract between the NAV control plane, dashboard, CLI and edge.
 // Wire format: JSON, camelCase keys, ISO-8601 timestamps.
 
-export type ServiceType = 'web' | 'private' | 'worker' | 'cron' | 'static';
+export type ServiceType = 'web' | 'private' | 'worker' | 'cron' | 'static' | 'workflow';
 export type Runtime = 'auto' | 'node' | 'python' | 'go' | 'ruby' | 'bun' | 'docker' | 'image' | 'static';
 export type Role = 'owner' | 'admin' | 'developer' | 'viewer';
 
@@ -270,7 +270,7 @@ export interface LogLine {
   deployId: string | null;
   instanceId: string | null;
   runId: string | null;
-  stream: 'build' | 'deploy' | 'runtime' | 'cron' | 'job' | 'system';
+  stream: 'build' | 'deploy' | 'runtime' | 'cron' | 'job' | 'system' | 'workflow';
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
   ts: string;
@@ -300,6 +300,83 @@ export interface Run {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+// Workflows ------------------------------------------------------------------
+
+export type WorkflowRunStatus = 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'canceled';
+export const WORKFLOW_RUN_ACTIVE: WorkflowRunStatus[] = ['queued', 'running', 'waiting'];
+export const WORKFLOW_RUN_TERMINAL: WorkflowRunStatus[] = ['succeeded', 'failed', 'canceled'];
+
+/** A task registered by the workflow's code, as reported by the live deploy's "describe" run. */
+export interface WorkflowTask {
+  name: string;
+  retries: number;
+  timeoutSeconds: number;
+  backoffSeconds: number;
+  maxBackoffSeconds: number;
+  description: string | null;
+  deployId: string;
+}
+
+/** A workflow service plus its workflow-specific state. */
+export interface Workflow {
+  service: Service;
+  maxConcurrency: number;
+  tasks: WorkflowTask[];
+  counts: Record<WorkflowRunStatus, number>;
+}
+
+/** One execution of the task code: the first start of an attempt, or a resume after subtasks / a sleep. */
+export interface WorkflowExecution {
+  attempt: number;
+  kind: 'start' | 'resume';
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: 'succeeded' | 'failed' | 'suspended' | 'timed_out' | 'canceled' | null;
+  error: string | null;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  deployId: string | null;
+  task: string;
+  status: WorkflowRunStatus;
+  input: unknown;
+  output: unknown;
+  error: string | null;
+  attempts: number;
+  maxAttempts: number;
+  timeoutSeconds: number;
+  parentRunId: string | null;
+  rootRunId: string | null;
+  depth: number;
+  idempotencyKey: string | null;
+  trigger: string;
+  retryOf: string | null;
+  executions: WorkflowExecution[];
+  nextAttemptAt: string | null;
+  wakeAt: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** A replay-journal entry: a ctx.run (child run) or ctx.sleep the run reached. */
+export interface WorkflowStep {
+  seq: number;
+  kind: 'run' | 'sleep';
+  task: string | null;
+  childRunId: string | null;
+  until: string | null;
+}
+
+export interface WorkflowRunDetail {
+  run: WorkflowRun;
+  steps: WorkflowStep[];
+  /** Every run in the same tree (the root and all its descendants), oldest first. */
+  tree: WorkflowRun[];
 }
 
 export interface CustomDomain {

@@ -6,6 +6,7 @@ import { SERVICE_PLANS } from '@nav/shared';
 import { notify, one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
 import { resolveServiceEnv } from '../lib/env.ts';
+import { workflowsToken } from '../lib/workflows.ts';
 import { DEFAULT_CONTAINER_PORT } from './runtime/docker.ts';
 import type { Artifact, Driver, Handle } from './runtime/types.ts';
 import { freePort, healthy, shipLog, sleep } from './util.ts';
@@ -54,6 +55,9 @@ export class InstanceManager {
         NAV_EXTERNAL_URL: url,
         NAV_EXTERNAL_HOSTNAME: url ? `${svc.slug}.${config.appsDomain}` : '',
         NAV_DISCOVERY_SERVICE: svc.slug,
+        // Lets any service start and follow workflow runs in its workspace (packages/workflows createClient).
+        NAV_API_URL: `${config.apiPublicUrl}/api/v1`,
+        NAV_WORKFLOWS_TOKEN: workflowsToken(svc.workspace_id),
         IS_PULL_REQUEST: svc.parent_service_id ? 'true' : (env.IS_PULL_REQUEST ?? 'false'),
       },
       files,

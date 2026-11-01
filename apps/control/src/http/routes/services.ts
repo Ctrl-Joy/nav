@@ -23,7 +23,7 @@ const Previews = z.object({ mode: z.enum(['off', 'manual', 'automatic']), expire
 
 const CreateService = z.object({
   name: z.string().trim().min(1).max(64),
-  type: z.enum(['web', 'private', 'worker', 'cron', 'static']),
+  type: z.enum(['web', 'private', 'worker', 'cron', 'static', 'workflow']),
   environmentId: z.string().nullable().optional(),
   runtime: Runtime.optional(),
   repoUrl: z.string().max(500).nullable().optional(),
@@ -90,7 +90,7 @@ async function deployFor(req: FastifyRequest, min: 'viewer' | 'developer' = 'vie
   return dep;
 }
 
-const LOG_STREAMS = ['build', 'deploy', 'runtime', 'cron', 'job', 'system'];
+const LOG_STREAMS = ['build', 'deploy', 'runtime', 'cron', 'job', 'system', 'workflow'];
 
 function logFilters(query: Record<string, string | undefined>, base: { col: string; value: string }) {
   const where = [`${base.col} = $1`];
@@ -107,7 +107,7 @@ function logFilters(query: Record<string, string | undefined>, base: { col: stri
   return { where, params };
 }
 
-async function fetchLogs(query: Record<string, string | undefined>, base: { col: string; value: string }) {
+export async function fetchLogs(query: Record<string, string | undefined>, base: { col: string; value: string }) {
   const { where, params } = logFilters(query, base);
   const limit = Math.min(Number(query.limit) || 200, 2000);
   if (query.after) {
@@ -125,7 +125,7 @@ async function fetchLogs(query: Record<string, string | undefined>, base: { col:
 }
 
 /** Streams logs matching `base` + filters over SSE. Coalesces notifications into batched queries. */
-function streamLogs(req: FastifyRequest, reply: Parameters<typeof openSse>[1], base: { col: string; value: string }, match: (n: { serviceId: string | null; databaseId: string | null; deployId: string | null; runId: string | null }) => boolean, isDone?: () => Promise<boolean>) {
+export function streamLogs(req: FastifyRequest, reply: Parameters<typeof openSse>[1], base: { col: string; value: string }, match: (n: { serviceId: string | null; databaseId: string | null; deployId: string | null; runId: string | null }) => boolean, isDone?: () => Promise<boolean>) {
   const query = req.query as Record<string, string | undefined>;
   const stream = openSse(req, reply);
   const resume = query.after ?? (req.headers['last-event-id'] as string | undefined);
@@ -316,7 +316,7 @@ export async function serviceRoutes(app: FastifyInstance) {
   app.post('/services/:id/scale', async (req) => {
     const { svc } = await svcFor(req, 'developer');
     const { instanceCount } = z.object({ instanceCount: z.number().int().min(1).max(100) }).parse(req.body);
-    if (['cron', 'static'].includes(svc.type)) throw badRequest(`${svc.type} services cannot be scaled`);
+    if (['cron', 'static', 'workflow'].includes(svc.type)) throw badRequest(`${svc.type} services cannot be scaled`);
     validatePlan(svc.plan, instanceCount, svc.disk);
     const row = await one('UPDATE services SET instance_count = $2, updated_at = now() WHERE id = $1 RETURNING *', [svc.id, instanceCount]);
     await serviceOp(row!, 'scale');

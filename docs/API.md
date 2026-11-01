@@ -165,6 +165,23 @@ Injected variables at runtime: `PORT`, `NAV=true`, `NAV_SERVICE_ID`, `NAV_SERVIC
 | POST | `/custom-domains/:id/verify` | DNS check (CNAME → `<slug>.<appsDomain>` or A → edge IP), then issues TLS cert via ACME |
 | DELETE | `/custom-domains/:id` | |
 
+## Workflows
+
+A workflow is a service with `type: 'workflow'` (create and deploy it with the service endpoints); `:id` takes its id or slug. Endpoints marked *token* also accept a service's injected `NAV_WORKFLOWS_TOKEN` (`Bearer navwf_…`), limited to workflows in its own workspace.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/workspaces/:ws/workflows` | `{items: Workflow[]}` (service, tasks of the live deploy, run counts, maxConcurrency) |
+| GET | `/workflows/:id` | `Workflow` |
+| PATCH | `/workflows/:id` | `{maxConcurrency}` (1-100) |
+| GET | `/workflows/:id/tasks` | *token* `{items: WorkflowTask[]}` |
+| POST | `/workflows/:id/tasks/:task/runs` | *token* `{input?, idempotencyKey?}` (or `Idempotency-Key` header) → `WorkflowRun`; 201 new, 200 when the key was already used |
+| GET | `/workflows/:id/runs` | *token* `?status=a,b&task=&q=&scope=all&parentRunId=&cursor=&limit=` → `Page<WorkflowRun>` (top-level runs unless `scope=all` or `parentRunId`) |
+| GET | `/workflow-runs/:id` | *token* `{run, steps, tree}`: the run, its replay journal, and every run in its tree |
+| POST | `/workflow-runs/:id/cancel` | *token* cancels the run and its unfinished subtasks |
+| POST | `/workflow-runs/:id/retry` | new run with the same task and input (failed or canceled top-level runs) |
+| GET | `/workflow-runs/:id/logs` | *token* `{items: LogLine[]}` (stream `workflow`); `/logs/stream` for SSE |
+
 ## Postgres
 
 | Method | Path | Notes |

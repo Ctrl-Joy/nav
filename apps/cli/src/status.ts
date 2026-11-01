@@ -1,7 +1,7 @@
 // Enumerations mirrored from @nav/shared. Kept as local constants so the CLI has no runtime
 // dependency on the shared package (only type imports are used from it).
 
-export const SERVICE_TYPES: readonly string[] = ['web', 'private', 'worker', 'cron', 'static'];
+export const SERVICE_TYPES: readonly string[] = ['web', 'private', 'worker', 'cron', 'static', 'workflow'];
 export const RUNTIMES: readonly string[] = ['auto', 'node', 'python', 'go', 'ruby', 'bun', 'docker', 'image', 'static'];
 export const LOG_STREAMS: readonly string[] = ['build', 'deploy', 'runtime', 'cron', 'job', 'system'];
 export const LOG_LEVELS: readonly string[] = ['debug', 'info', 'warn', 'error'];

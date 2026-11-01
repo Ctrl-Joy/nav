@@ -1,0 +1,24 @@
+{
+  "name": "@nav/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SDK for NAV Workflows: durable background tasks with retries, timeouts, subtasks and sleeps",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "types": "./index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

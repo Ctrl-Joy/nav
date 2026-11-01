@@ -4,7 +4,7 @@ import { Button, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator } from
 import { RESOURCE_META, type ResourceKind } from '@/components/ResourceIcon';
 import { cn } from '@/lib/cn';
 
-export const NEW_ITEMS: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static'];
+export const NEW_ITEMS: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static', 'workflow'];
 
 export function newResourcePath(ws: string, kind: ResourceKind): string {
   if (kind === 'postgres') return `/w/${ws}/databases/new`;

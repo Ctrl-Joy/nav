@@ -79,6 +79,7 @@ const STATUS: Record<string, StatusDef> = {
   // run / backup
   pending: { tone: 'neutral', label: 'Pending', pulse: true },
   running: { tone: 'info', label: 'Running', pulse: true },
+  waiting: { tone: 'info', label: 'Waiting' },
   succeeded: { tone: 'success', label: 'Succeeded' },
   completed: { tone: 'success', label: 'Completed' },
   // domains / certs

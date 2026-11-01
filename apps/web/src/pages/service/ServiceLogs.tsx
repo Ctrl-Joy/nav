@@ -16,6 +16,7 @@ const STREAMS = [
   { value: 'deploy', label: 'Deploy' },
   { value: 'cron', label: 'Cron' },
   { value: 'job', label: 'Jobs' },
+  { value: 'workflow', label: 'Workflow runs' },
   { value: 'system', label: 'System' },
 ];
 const LEVELS = [

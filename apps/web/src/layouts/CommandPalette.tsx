@@ -60,7 +60,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
     const go = (to: string) => () => navigate(to);
     const out: PaletteItem[] = [];
     if (canWrite) {
-      const kinds: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static', 'postgres', 'keyvalue', 'blueprint'];
+      const kinds: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static', 'workflow', 'postgres', 'keyvalue', 'blueprint'];
       for (const k of kinds) {
         const Icon = RESOURCE_META[k].icon;
         out.push({ id: `new-${k}`, group: 'Actions', label: `New ${RESOURCE_META[k].label}`, icon: <Icon className="size-4" />, run: go(newResourcePath(ws, k)), keywords: 'create add' });
@@ -80,6 +80,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
     const nav: [string, string, ReactNode][] = [
       ['Overview', '', <LayoutGrid className="size-4" />],
       ['Projects', 'projects', <FolderKanban className="size-4" />],
+      ['Workflows', 'workflows', <ResourceIcon kind="workflow" boxed={false} />],
       ['Postgres', 'databases', <ResourceIcon kind="postgres" boxed={false} />],
       ['Env Groups', 'env-groups', <Boxes className="size-4" />],
       ['Blueprints', 'blueprints', <FileStack className="size-4" />],

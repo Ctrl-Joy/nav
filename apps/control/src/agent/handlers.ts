@@ -1,9 +1,10 @@
 // Job handlers executed by the node agent.
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { config, publicUrlFor } from '@nav/shared/config';
-import { SERVICE_PLANS } from '@nav/shared';
+import { SERVICE_PLANS, type SecretFile } from '@nav/shared';
 import { notify, one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
 import { authedUrl, git } from '../lib/git.ts';
@@ -13,7 +14,9 @@ import { localize, publish, removeLocal, retire } from './artifacts.ts';
 import { activeInstances, describePlacement, place, startInstances, stopInstances, waitInstances } from './cluster.ts';
 import { detect } from './detect.ts';
 import { HEALTH_TIMEOUT_MS, type Entry, type InstanceManager } from './instances.ts';
-import type { Artifact, Driver, RegistryAuth } from './runtime/types.ts';
+import type { Artifact, Driver, Handle, RegistryAuth } from './runtime/types.ts';
+import { discoverTasks } from './workflows.ts';
+import { saveTasks } from '../lib/workflows.ts';
 import { decrypt } from '@nav/shared/crypto';
 import { flushLogs, shipLog, sleep } from './util.ts';
 
@@ -156,7 +159,7 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
     if (canceled()) throw new DeployError('canceled', 'canceled');
 
     // ---- Pre-deploy ---------------------------------------------------------------------------------
-    if (svc.pre_deploy_command && ['web', 'private', 'worker'].includes(svc.type)) {
+    if (svc.pre_deploy_command && ['web', 'private', 'worker', 'workflow'].includes(svc.type)) {
       await setDeploy(deploy.id, { status: 'pre_deploy_in_progress' }, ws, svc.id);
       deployLog(`==> Running pre-deploy command '${svc.pre_deploy_command}'`);
       const code = await runOneOff(ctx, svc, deploy, artifact!, svc.pre_deploy_command, (l, lvl) => deployLog(l, lvl), abort.signal, 30 * 60_000);
@@ -190,6 +193,16 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
       // Let the edge pick up the new upstreams (LISTEN nav_routes, ~100ms debounce) before reporting live.
       await sleep(750);
       deployLog(`==> Your service is live 🎉${['web'].includes(svc.type) ? `  ${publicUrlFor(svc.slug)}` : ''}`);
+    } else if (svc.type === 'workflow') {
+      // Workflows run nothing between runs: the deploy goes live once the build reports its tasks.
+      deployLog('==> Discovering tasks (running the build in describe mode)');
+      const tasks = await discoverTasks(ctx, fresh, deploy, artifact!, deployLog, abort.signal).catch((err) => {
+        if (canceled()) throw new DeployError('canceled', 'canceled');
+        throw new DeployError('update_failed', `could not discover tasks: ${(err as Error).message}`);
+      });
+      if (!tasks.length) throw new DeployError('update_failed', "no tasks registered: import { task } from '@nav/workflows' and register at least one task in the start module");
+      await saveTasks(svc.id, deploy.id, tasks);
+      deployLog(`==> Registered ${tasks.length} task${tasks.length === 1 ? '' : 's'}: ${tasks.map((t) => t.name).join(', ')}`);
     } else {
       deployLog('==> Deploy complete');
     }
@@ -224,15 +237,23 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
   }
 }
 
-/** Runs a command to completion in the service's artifact (pre-deploy, cron, one-off jobs). */
-export async function runOneOff(ctx: Ctx, svc: Row, deploy: Row, artifact: Artifact, command: string | null, log: (l: string, level?: string) => void, signal: AbortSignal, timeoutMs: number): Promise<number> {
+/** Starts a one-off process / container in the service's artifact with its runtime environment (plus `extra`). */
+export async function startOneOff(
+  ctx: Ctx, svc: Row, deploy: Row, artifact: Artifact, command: string | null, log: (l: string, level?: string) => void,
+  extra: { env?: Record<string, string>; files?: SecretFile[]; instanceId?: string } = {},
+): Promise<Handle> {
   const { env, files } = await ctx.instances.runtimeEnv(svc, deploy, null);
   const plan = SERVICE_PLANS.find((p) => p.id === svc.plan) ?? SERVICE_PLANS[1];
   artifact = await localize(ctx, artifact, (l) => log(l));
-  const handle = await ctx.driver.start({
-    instanceId: `job-${Date.now().toString(36)}`, serviceId: svc.id, workspaceId: svc.workspace_id, slug: svc.slug, artifact,
-    command, env, files, containerPort: null, plan, disk: svc.disk, oneOff: true, onLog: (l, lvl) => log(l, lvl),
+  return ctx.driver.start({
+    instanceId: extra.instanceId ?? `job-${Date.now().toString(36)}${randomBytes(3).toString('hex')}`, serviceId: svc.id, workspaceId: svc.workspace_id, slug: svc.slug, artifact,
+    command, env: { ...env, ...extra.env }, files: [...files, ...(extra.files ?? [])], containerPort: null, plan, disk: svc.disk, oneOff: true, onLog: (l, lvl) => log(l, lvl),
   });
+}
+
+/** Runs a command to completion in the service's artifact (pre-deploy, cron, one-off jobs). */
+export async function runOneOff(ctx: Ctx, svc: Row, deploy: Row, artifact: Artifact, command: string | null, log: (l: string, level?: string) => void, signal: AbortSignal, timeoutMs: number): Promise<number> {
+  const handle = await startOneOff(ctx, svc, deploy, artifact, command, log);
   const stop = () => handle.stop(5000);
   signal.addEventListener('abort', stop, { once: true });
   const timer = setTimeout(() => { log(`==> Timed out after ${Math.round(timeoutMs / 60000)} minutes`, 'error'); void stop(); }, timeoutMs);
@@ -316,6 +337,8 @@ export async function handleDeleteService(ctx: Ctx, payload: { serviceId: string
   if (!svc) return;
   await handleStop(ctx, payload);
   ctx.instances.closeLb(svc.id);
+  // Workflow runs still executing notice the cancel and stop their processes.
+  await q("UPDATE workflow_runs SET status = 'canceled', finished_at = now() WHERE service_id = $1 AND status IN ('queued','running','waiting')", [svc.id]);
   // Builds and disk data are removed on every node (and from the store) by node-targeted cleanup jobs.
   const deploys = await q('SELECT DISTINCT artifact FROM deploys WHERE service_id = $1 AND artifact IS NOT NULL', [svc.id]);
   await retire(deploys.map((d) => d.artifact), svc.id);

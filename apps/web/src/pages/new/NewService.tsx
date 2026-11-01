@@ -32,7 +32,7 @@ import { CRON_PRESETS, describeCron } from '@/lib/cron';
 import { repoSlug } from '@/lib/format';
 import { useTitle } from '@/lib/useTitle';
 
-const SERVICE_TYPES: ServiceType[] = ['web', 'private', 'worker', 'cron', 'static'];
+const SERVICE_TYPES: ServiceType[] = ['web', 'private', 'worker', 'cron', 'static', 'workflow'];
 type SourceKind = 'github' | 'git' | 'image';
 
 const RUNTIMES: { value: Runtime; label: string }[] = [
@@ -196,7 +196,7 @@ function Wizard({ type }: { type: ServiceType }) {
       secretFiles: secretFiles.filter((f) => f.filename.trim()),
       envGroupIds,
       ...(runtime === 'docker' && !isImage ? { dockerfilePath, dockerContext } : {}),
-      disk: diskEnabled && type !== 'static' && type !== 'cron' ? disk : null,
+      disk: diskEnabled && type !== 'static' && type !== 'cron' && type !== 'workflow' ? disk : null,
     };
     try {
       const res = await create.mutateAsync(input);
@@ -397,7 +397,7 @@ function Wizard({ type }: { type: ServiceType }) {
             ) : (
               <>
                 {runtime !== 'docker' && (
-                  <Field label={type === 'cron' ? 'Command' : 'Start command'} optional={type !== 'cron'} hint={type === 'cron' ? 'Runs on each schedule tick.' : 'Leave empty to use the detected default or Procfile.'}>
+                  <Field label={type === 'cron' ? 'Command' : 'Start command'} optional={type !== 'cron'} hint={type === 'cron' ? 'Runs on each schedule tick.' : type === 'workflow' ? 'Loads the module that registers your tasks with @nav/workflows. Each run starts it once.' : 'Leave empty to use the detected default or Procfile.'}>
                     {(id) => <Input id={id} mono value={startCommand} onChange={(e) => setStartCommand(e.target.value)} placeholder={type === 'cron' ? 'node scripts/report.js' : 'npm start'} />}
                   </Field>
                 )}
@@ -504,7 +504,7 @@ function Wizard({ type }: { type: ServiceType }) {
                     <Field label="Docker build context">{(id) => <Input id={id} mono value={dockerContext} onChange={(e) => setDockerContext(e.target.value)} />}</Field>
                   </div>
                 )}
-                {type !== 'static' && type !== 'cron' && (
+                {type !== 'static' && type !== 'cron' && type !== 'workflow' && (
                   <div className="space-y-3">
                     <Switch checked={diskEnabled} onChange={setDiskEnabled} label="Persistent disk" description="Attach a volume that survives deploys. Services with a disk run a single instance." />
                     {diskEnabled && (

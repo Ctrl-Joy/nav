@@ -8,6 +8,7 @@ import { notify, pool, q } from '../db/pool.ts';
 import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
 import { sleepIdleServices } from '../lib/sleep.ts';
+import { sweepWorkflowRuns } from '../lib/workflows.ts';
 import { ensurePlatformCertificate } from '../lib/platformTls.ts';
 import { expirePreviewEnvironments } from '../lib/previews.ts';
 import { deleteStoredArtifact } from '@nav/shared/artifacts';
@@ -199,4 +200,5 @@ export function startScheduler(): void {
   every('daily', 60 * 60_000, 9005, dailyTick);
   every('free-sleep', 60_000, 9006, async () => { await sleepIdleServices(); });
   every('sandbox-expiry', 10_000, 9007, async () => { await expireSandboxes(); });
+  every('workflows', 15_000, 9008, sweepWorkflowRuns);
 }

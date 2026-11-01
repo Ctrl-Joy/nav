@@ -95,7 +95,7 @@ nav open api`,
       { type: 'h3', text: 'Try the bundled examples without GitHub', id: 'examples' },
       {
         type: 'p',
-        text: "Serve the example apps over local Git smart-HTTP, then create a service from `http://localhost:9420/node-web.git`. The same server also offers `static-site`, `worker`, `cron-job`, and `examples.git`, which contains a `nav.yaml` blueprint.",
+        text: "Serve the example apps over local Git smart-HTTP, then create a service from `http://localhost:9420/node-web.git`. The same server also offers `static-site`, `worker`, `cron-job`, `workflows` (create it as a Workflow), and `examples.git`, which contains a `nav.yaml` blueprint.",
       },
       { type: 'code', code: 'node scripts/git-serve.ts' },
     ],
@@ -189,6 +189,79 @@ nav open api`,
       {
         type: 'p',
         text: "For a one-off command in the service's environment, use `nav run <service> --wait -- <command...>`. `nav jobs <service>` lists one-off jobs and cron runs.",
+      },
+    ],
+  },
+  {
+    slug: 'workflows',
+    group: 'Services',
+    title: 'Workflows',
+    blocks: [
+      {
+        type: 'p',
+        text: "A workflow (`type: workflow`) runs durable background tasks that you define in code. It is built from a repository like any other service, but nothing runs between runs: each run of a task executes once in a fresh process (or container) from the live build, with automatic retries, a per-task timeout, cancellation and subtasks.",
+      },
+      { type: 'h3', text: 'Define tasks', id: 'workflows-sdk' },
+      {
+        type: 'p',
+        text: "Register tasks with the JavaScript / TypeScript SDK `@nav/workflows` (in this repository under `packages/workflows`; the `examples/workflows` repo shows how to vendor it). The start command loads the module that registers them, for example `node index.js`. On every deploy NAV runs the build once in describe mode and records the tasks it registers; a deploy that registers none fails.",
+      },
+      {
+        type: 'code',
+        code: `import { task, NonRetryableError } from '@nav/workflows';
+
+export const sendEmail = task('send-email', { retries: 3, timeoutSeconds: 600 }, async (input) => {
+  if (!input?.to) throw new NonRetryableError('input.to is required');
+  await mailer.send(input.to, input.subject);
+  return { delivered: true };
+});
+
+export const square = task('square', async (n) => n * n);
+
+// Fan out: one child run per number, in parallel. The parent holds no process while it waits.
+export const sumOfSquares = task('sum-of-squares', async ({ numbers }, ctx) => {
+  const squares = await Promise.all(numbers.map((n) => ctx.run(square, n)));
+  await ctx.sleep(60_000);           // durable sleep
+  return squares.reduce((a, b) => a + b, 0);
+});`,
+      },
+      {
+        type: 'list',
+        items: [
+          "`retries` (default 0): extra attempts after a failure. Delays grow exponentially from `backoffSeconds` (default 5) up to `maxBackoffSeconds` (default 600). Timeouts and crashes count as failed attempts; throw `NonRetryableError` to fail at once.",
+          "`timeoutSeconds` (default 3600): limit for each execution of the task code. Time spent waiting on subtasks or sleeping does not count.",
+          "`ctx.run(task, input)` starts a subtask as a child run and resolves with its output (it rejects with `TaskRunError` when the child fails or is canceled). `ctx.sleep(ms)` waits durably. `ctx.attempt` is the current attempt number.",
+          "Inputs and outputs are JSON (up to 1 MB each). Logs printed by the task appear on the run and in the service logs.",
+        ],
+      },
+      { type: 'h3', text: 'How durable runs work', id: 'workflows-replay' },
+      {
+        type: 'p',
+        text: "Subtasks and sleeps are numbered steps in a journal. The first time the code reaches a new step, the process reports the steps it wants and exits; the run becomes `waiting`. NAV starts the subtasks as child runs (or waits out the sleep), then runs the task again from the top: recorded steps return their results immediately, so only new steps do work. This is replay, so code outside `ctx.run` and `ctx.sleep` must be deterministic and safe to repeat; put side effects such as sending email in a subtask. On a retry, succeeded subtasks are replayed and failed ones run again. A run whose code takes a different path than its journal fails with `NonDeterminismError`.",
+      },
+      { type: 'h3', text: 'Start runs', id: 'workflows-runs' },
+      {
+        type: 'p',
+        text: "Start a run from the workflow's Runs tab, the CLI or the API. With an idempotency key (body `idempotencyKey` or an `Idempotency-Key` header), repeating the request returns the first run instead of starting another. Other services in the workspace get `NAV_API_URL` and `NAV_WORKFLOWS_TOKEN`, a token that can only start, read and cancel workflow runs in that workspace.",
+      },
+      {
+        type: 'code',
+        code: `nav workflows run jobs send-email --input '{"to":"ada@example.com"}' --wait
+nav workflows runs jobs --status failed
+nav workflows cancel <run-id>
+
+curl -X POST $NAV_API_URL/workflows/jobs/tasks/send-email/runs \\
+  -H "Authorization: Bearer $NAV_WORKFLOWS_TOKEN" -H "Idempotency-Key: order-42" \\
+  -H "Content-Type: application/json" -d '{"input":{"to":"ada@example.com"}}'
+
+// or, from Node: import { createClient } from '@nav/workflows'
+const client = createClient();
+const run = await client.runTask('jobs', 'send-email', { to: 'ada@example.com' });
+const done = await client.waitForRun(run.id);`,
+      },
+      {
+        type: 'p',
+        text: "Runs are scheduled through the job queue in their own lane, so a burst of runs never delays deploys. Each workflow has a maximum number of runs executing at once across all nodes (default 10, set on the Tasks tab); waiting runs do not hold a slot. Canceling a run cancels its unfinished subtasks too; retrying a failed or canceled run starts a new run with the same input.",
       },
     ],
   },

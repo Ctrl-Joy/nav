@@ -15,7 +15,9 @@ import {
   handleDbUpgrade, monitorHighAvailability, recoverPoolers, recoverReplicas,
 } from './pgfeatures.ts';
 import { handleBlueprintPreview, handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
-import { CONTROL_JOBS } from '../scheduler/jobs.ts';
+import { claim, type Lane } from './queue.ts';
+import { handleWorkflowRun } from './workflows.ts';
+import { RUN_JOB, attemptFailed } from '../lib/workflows.ts';
 import { liveNodes } from './cluster.ts';
 import { startShellServer } from './shell.ts';
 import { recoverSandboxes, sandboxManagerFor } from './sandbox/index.ts';
@@ -33,10 +35,9 @@ if (!process.env.NAV_MASTER_KEY) {
 }
 
 const MAX_CONCURRENT = Number(process.env.NAV_AGENT_CONCURRENCY ?? 4);
-/** Instance start/stop and cleanup jobs run in their own lane: deploys elsewhere wait on them, so they must
- *  never queue behind those deploys. */
-const NODE_LANE = ['instance_start', 'instance_stop', 'node_cleanup'];
 const NODE_LANE_CONCURRENCY = 32;
+/** Workflow runs executing on this node at once (each workflow also has its own cluster-wide limit). */
+const WORKFLOW_LANE_CONCURRENCY = Number(process.env.NAV_AGENT_WORKFLOW_CONCURRENCY ?? 8);
 const VERSION = '0.1.0';
 
 async function nodeId(): Promise<string> {
@@ -95,40 +96,8 @@ const HANDLERS: Record<string, Handler> = {
   kv_suspend: handleKvSuspend,
   kv_resume: handleKvResume,
   kv_delete: handleKvDelete,
+  workflow_run: handleWorkflowRun,
 };
-
-/**
- * Atomically claims the next runnable job of a lane, honouring per-key concurrency. A job naming a node is only
- * claimed by that node; database jobs follow the node that holds the database; a draining node takes no new
- * untargeted work.
- */
-async function claim(nid: string, nodeLane: boolean, draining: boolean): Promise<{ id: number; kind: string; payload: any; attempts: number; max_attempts: number } | null> {
-  const c = await pool.connect();
-  try {
-    await c.query('BEGIN');
-    await c.query('SELECT pg_advisory_xact_lock(77001)');
-    const res = await c.query(
-      `UPDATE jobs SET status = 'running', locked_by = $1, locked_at = now(), attempts = attempts + 1
-       WHERE id = (
-         SELECT j.id FROM jobs j WHERE j.status = 'queued' AND j.run_at <= now()
-           AND (j.kind = ANY($2)) = $3 AND NOT (j.kind = ANY($5))
-           AND (j.node_id = $1 OR (j.node_id IS NULL AND NOT $4))
-           AND NOT (j.kind LIKE 'kv\\_%' AND EXISTS (SELECT 1 FROM key_values k WHERE k.id = j.payload->>'keyValueId' AND k.node_id IS NOT NULL AND k.node_id <> $1))
-           AND NOT (j.kind LIKE 'db\\_%' AND EXISTS (SELECT 1 FROM databases d WHERE d.id = j.payload->>'databaseId' AND d.node_id IS NOT NULL AND d.node_id <> $1))
-           AND (j.concurrency_key IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status = 'running' AND r.concurrency_key = j.concurrency_key))
-         ORDER BY j.id FOR UPDATE SKIP LOCKED LIMIT 1)
-       RETURNING id, kind, payload, attempts, max_attempts`,
-      [nid, NODE_LANE, nodeLane, draining, CONTROL_JOBS],
-    );
-    await c.query('COMMIT');
-    return res.rows[0] ?? null;
-  } catch (err) {
-    await c.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    c.release();
-  }
-}
 
 async function main() {
   await migrate();
@@ -173,6 +142,12 @@ async function main() {
   // Jobs this node was running when it died.
   await q("UPDATE deploys SET status = 'update_failed', error = 'agent restarted during deploy', finished_at = now() WHERE id IN (SELECT payload->>'deployId' FROM jobs WHERE kind = 'deploy' AND status = 'running' AND locked_by = $1)", [nid]);
   await q("UPDATE runs SET status = 'failed', finished_at = now() WHERE id IN (SELECT payload->>'runId' FROM jobs WHERE kind = 'run' AND status = 'running' AND locked_by = $1)", [nid]);
+  // Workflow attempts that were executing here failed with the agent: retry them (or fail them when out of attempts).
+  const interrupted = await q(
+    "SELECT * FROM workflow_runs WHERE status = 'running' AND id IN (SELECT payload->>'runId' FROM jobs WHERE kind = $2 AND status = 'running' AND locked_by = $1)",
+    [nid, RUN_JOB],
+  );
+  for (const r of interrupted) await attemptFailed(r, 'the agent restarted during the attempt', true);
   await q("UPDATE jobs SET status = CASE WHEN attempts < max_attempts AND kind NOT IN ('deploy','run') THEN 'queued' ELSE 'failed' END, locked_by = NULL, error = 'agent restarted' WHERE status = 'running' AND locked_by = $1", [nid]);
   await recoverDatabases(ctx);
   await recoverReplicas(ctx).catch((e) => console.error('[agent] replica recovery', e.message));
@@ -204,13 +179,14 @@ async function main() {
   // Key Value TLS proxies pick up an issued or renewed platform certificate.
   setInterval(() => refreshKvCertificates(ctx).catch((e) => console.error('[agent] key value certificates', e.message)), 5 * 60_000);
 
-  // Job loop: two lanes, each with its own concurrency.
-  const running = { work: 0, node: 0 };
+  // Job loop: three lanes (deploys & co., node-targeted instance work, workflow runs), each with its own concurrency.
+  const running: Record<Lane, number> = { work: 0, node: 0, workflow: 0 };
+  const LIMITS: Record<Lane, number> = { work: MAX_CONCURRENT, node: NODE_LANE_CONCURRENCY, workflow: WORKFLOW_LANE_CONCURRENCY };
   let stopping = false;
-  const loop = async (lane: 'work' | 'node') => {
-    const max = lane === 'node' ? NODE_LANE_CONCURRENCY : MAX_CONCURRENT;
+  const loop = async (lane: Lane) => {
+    const max = LIMITS[lane];
     while (!stopping && running[lane] < max) {
-      const job = await claim(nid, lane === 'node', draining).catch((err) => {
+      const job = await claim(nid, lane, draining).catch((err) => {
         console.error('[agent] claim failed', err.message);
         return null;
       });
@@ -239,7 +215,7 @@ async function main() {
       })();
     }
   };
-  const tick = () => { void loop('node'); void loop('work'); };
+  const tick = () => { void loop('node'); void loop('work'); void loop('workflow'); };
   setInterval(tick, 1000);
   tick();
 

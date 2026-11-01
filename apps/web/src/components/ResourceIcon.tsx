@@ -1,4 +1,4 @@
-import { Boxes, Clock, Cog, Database, DatabaseZap, FileStack, Globe, Layers, Lock, type LucideIcon } from 'lucide-react';
+import { Boxes, Clock, Cog, Database, DatabaseZap, FileStack, Globe, Layers, Lock, Workflow, type LucideIcon } from 'lucide-react';
 import type { ServiceType } from '@nav/shared';
 import { cn } from '@/lib/cn';
 
@@ -10,6 +10,7 @@ export const RESOURCE_META: Record<ResourceKind, { label: string; icon: LucideIc
   worker: { label: 'Background Worker', icon: Cog, description: 'Long-running process for queues and async jobs.' },
   cron: { label: 'Cron Job', icon: Clock, description: 'Run a command on a schedule.' },
   static: { label: 'Static Site', icon: Layers, description: 'Build once, serve from the edge with custom headers & rewrites.' },
+  workflow: { label: 'Workflow', icon: Workflow, description: 'Durable background tasks with retries, timeouts and subtasks.' },
   postgres: { label: 'Postgres', icon: Database, description: 'Managed PostgreSQL with backups and a query console.' },
   keyvalue: { label: 'Key Value', icon: DatabaseZap, description: 'Managed Redis-compatible store for caches, queues and sessions.' },
   blueprint: { label: 'Blueprint', icon: FileStack, description: 'Infrastructure as code from a nav.yaml file.' },

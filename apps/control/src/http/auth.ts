@@ -7,6 +7,7 @@ import type { Role } from '@nav/shared';
 import { one, q } from '../db/pool.ts';
 import { HttpError, forbidden, notFound } from '../lib/core.ts';
 import { ORG_RANK, type OrgRole } from '../lib/orgs.ts';
+import { isWorkflowsToken, verifyWorkflowsToken } from '../lib/workflows.ts';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: object) => Promise<Buffer>;
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -54,7 +55,9 @@ export interface AuthUser { id: string; email: string; name: string }
 declare module 'fastify' {
   interface FastifyRequest {
     user: AuthUser | null;
-    authKind: 'session' | 'api_key' | null;
+    authKind: 'session' | 'api_key' | 'workflow_token' | null;
+    /** Set for a service's NAV_WORKFLOWS_TOKEN: the only workspace it may act in (workflow runs only). */
+    tokenWorkspaceId: string | null;
   }
 }
 
@@ -62,9 +65,17 @@ declare module 'fastify' {
 export async function authenticate(req: FastifyRequest): Promise<void> {
   req.user = null;
   req.authKind = null;
+  req.tokenWorkspaceId = null;
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) {
     const token = header.slice(7).trim();
+    if (isWorkflowsToken(token)) {
+      const ws = verifyWorkflowsToken(token);
+      if (!ws) throw new HttpError(401, 'unauthorized', 'invalid workflows token');
+      req.authKind = 'workflow_token';
+      req.tokenWorkspaceId = ws;
+      return;
+    }
     const row = await one(
       'UPDATE api_keys k SET last_used_at = now() FROM users u WHERE k.token_hash = $1 AND u.id = k.user_id RETURNING u.id, u.email, u.name',
       [sha256(token)],
