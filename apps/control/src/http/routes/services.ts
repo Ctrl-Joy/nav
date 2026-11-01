@@ -409,7 +409,8 @@ export async function serviceRoutes(app: FastifyInstance) {
 
   async function envChanged(svc: Row, userId: string, deploy: boolean) {
     await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: userId, kind: 'env_updated' });
-    if (deploy && svc.current_deploy_id && !svc.suspended) await createDeploy(svc, { trigger: 'env_change', actorId: userId });
+    // Also when no deploy is live yet: fixing the env is how a service whose first build failed gets going.
+    if (deploy && !svc.suspended) await createDeploy(svc, { trigger: 'env_change', actorId: userId });
   }
 
   app.get('/services/:id/env-vars', async (req) => {
