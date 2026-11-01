@@ -2,7 +2,7 @@
 
 export type DocBlock =
   | { type: 'p'; text: string }
-  | { type: 'h3'; text: string }
+  | { type: 'h3'; text: string; id?: string }
   | { type: 'list'; items: string[] }
   | { type: 'code'; code: string };
 
@@ -70,9 +70,29 @@ nav open api`,
       },
       {
         type: 'p',
-        text: "NAV detects the runtime from files in the repository, such as `package.json`, `requirements.txt`, `go.mod`, `Gemfile` or a `Dockerfile`.",
+        text: "NAV detects the runtime from files in the repository, such as `package.json`, `requirements.txt`, `go.mod`, `Gemfile` or a `Dockerfile`. A `web:` line in a `Procfile` always sets the start command, and any command can be overridden in the service settings.",
       },
-      { type: 'h3', text: 'Try the bundled examples without GitHub' },
+      { type: 'h3', text: 'Node.js', id: 'runtime-node' },
+      {
+        type: 'p',
+        text: "Chosen when the repository has a `package.json`. The package manager follows the lockfile: `pnpm-lock.yaml` uses pnpm, `yarn.lock` uses Yarn, otherwise npm (`npm ci` with a `package-lock.json`). If there is a `build` script it runs after installing. The start command is the `start` script, then `main` from `package.json`, then `server.js` or `index.js`. Listen on `PORT` and `0.0.0.0`.",
+      },
+      { type: 'h3', text: 'Python', id: 'runtime-python' },
+      {
+        type: 'p',
+        text: "Chosen for `requirements.txt`, `pyproject.toml` or a `Pipfile`. NAV creates a virtual environment in `.venv` and installs `requirements.txt` (or the project itself). Django projects (`manage.py`) start with `gunicorn wsgi:application`, `app.py` with `gunicorn app:app`, and `main.py` with `python main.py`.",
+      },
+      { type: 'h3', text: 'Go', id: 'runtime-go' },
+      {
+        type: 'p',
+        text: "Chosen for a `go.mod`. NAV runs `go build -o app .` and starts `./app`. Read the port from the `PORT` environment variable.",
+      },
+      { type: 'h3', text: 'Bun', id: 'runtime-bun' },
+      {
+        type: 'p',
+        text: "Chosen when the repository has `bun.lock` or `bun.lockb`, even alongside a `package.json`. NAV runs `bun install` and starts with `bun start`.",
+      },
+      { type: 'h3', text: 'Try the bundled examples without GitHub', id: 'examples' },
       {
         type: 'p',
         text: "Serve the example apps over local Git smart-HTTP, then create a service from `http://localhost:9420/node-web.git`. The same server also offers `static-site`, `worker`, `cron-job`, and `examples.git`, which contains a `nav.yaml` blueprint.",
@@ -535,6 +555,12 @@ nav logs api --stream build --search "npm ERR"`,
         type: 'p',
         text: "Native runtimes get a generated Dockerfile on a Node, Python, Go, Ruby or Bun base image. A repository with its own `Dockerfile` is built as it is, and `image` services pull a prebuilt image.",
       },
+      { type: 'h3', text: 'Bring your own Dockerfile', id: 'dockerfile' },
+      {
+        type: 'p',
+        text: "A `Dockerfile` at the root (or at the path set in the service's Dockerfile path, with its own build context) is used as it is. Build arguments named `NAV_*` are passed in. Images from a private registry need a registry credential, added in workspace settings and selected on the service.",
+      },
+      { type: 'h3', text: 'Container limits' },
       {
         type: 'p',
         text: "Containers run with these limits:",
@@ -628,6 +654,7 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
     group: 'Operate',
     title: 'Security',
     blocks: [
+      { type: 'h3', text: 'Security model', id: 'security-model' },
       {
         type: 'list',
         items: [
@@ -642,7 +669,19 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
           "Build and run sandboxes never receive platform variables, the database URL or the master key.",
           "Sign-in with GitHub, GitLab, Bitbucket, Google or SSO uses the authorization-code flow with a one-time state cookie, and PKCE everywhere except GitHub. A provider account is linked to an existing NAV account by email only when that account's address is verified, so nobody can pre-register your email and wait for you to sign in.",
           "Password reset links are single-use, stored hashed, expire after an hour and sign out every other session. The forgot-password endpoint gives the same answer whether or not the account exists.",
+          "Two-factor authentication uses authenticator-app codes (each accepted once) with single-use recovery codes, and applies to password, provider and reset sign-ins. Workspaces can require it.",
+          "Every change made through the API is written to the workspace audit log with the person or API key, the action and the IP address.",
         ],
+      },
+      { type: 'h3', text: 'Hardened containers', id: 'hardened-containers' },
+      {
+        type: 'p',
+        text: "With the Docker driver every instance gets the plan's memory and CPU limits, a 512-process limit, all Linux capabilities dropped except the few a typical app needs, no-new-privileges, a private /tmp, no Docker socket, and its workspace's own network. Platform secrets are never passed in. Instance ports are published only on the node's private address; the edge is the only public way in.",
+      },
+      { type: 'h3', text: 'Verified webhooks', id: 'verified-webhooks' },
+      {
+        type: 'p',
+        text: "Incoming GitHub webhooks are checked with HMAC SHA-256 in constant time before anything runs. Outgoing NAV webhooks are signed following the Standard Webhooks spec: verify `webhook-signature` as an HMAC SHA-256 of `<webhook-id>.<webhook-timestamp>.<body>` with your endpoint's `whsec_` secret, and reject old timestamps. Webhook and log-stream targets must be public addresses in production.",
       },
       {
         type: 'h3',
@@ -681,6 +720,27 @@ NAV_SSO_DOMAINS=example.com,example.org`,
         type: 'p',
         text: "NAV runs as a control plane, a node agent and an edge, with PostgreSQL 17 as the platform database. Build the dashboard once and control serves the result from `apps/web/dist`.",
       },
+      { type: 'h3', text: 'Architecture', id: 'architecture' },
+      {
+        type: 'p',
+        text: "Every component talks through the platform database: work is a queue of jobs, routing is a view of healthy instances, and changes are announced with Postgres notifications. One control plane and edge serve any number of agent nodes.",
+      },
+      { type: 'h3', text: 'Control plane', id: 'control-plane' },
+      {
+        type: 'p',
+        text: "Serves the REST API and the dashboard, runs the scheduler (cron, autoscaling, reconciliation, backups, failed-node detection), sends notifications and webhooks, holds the artifact store that moves builds between nodes, and issues TLS certificates.",
+      },
+      { type: 'h3', text: 'Agent', id: 'agent' },
+      {
+        type: 'p',
+        text: "Runs on every server. It claims jobs, builds from Git, starts and supervises the instances placed on its node with the Docker or process driver, runs databases, Key Value and one-off jobs, and reports health and metrics. A node that stops heartbeating has its instances replaced on the others.",
+      },
+      { type: 'h3', text: 'Edge proxy', id: 'edge-proxy' },
+      {
+        type: 'p',
+        text: "The only public entry point. It terminates TLS (with SNI per custom domain), routes each hostname to healthy instances with load balancing and retries, serves static sites, enforces inbound IP rules and maintenance mode, caches what apps mark cacheable, and records request metrics.",
+      },
+      { type: 'h3', text: 'Install' },
       {
         type: 'code',
         code: `npm install

@@ -33,7 +33,7 @@ function BlockView({ block }: { block: DocBlock }) {
         </p>
       );
     case 'h3':
-      return <h3 className="pt-2 text-[17px] font-medium tracking-tight text-fg">{block.text}</h3>;
+      return <h3 id={block.id} className="scroll-mt-20 pt-2 text-[17px] font-medium tracking-tight text-fg">{block.text}</h3>;
     case 'list':
       return (
         <ul className="list-disc space-y-2 pl-5 text-[15px] leading-7 text-fg-muted marker:text-fg-subtle">

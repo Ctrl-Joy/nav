@@ -160,14 +160,14 @@ const FOOTER: FooterGroup[][] = [
   [{ title: 'Services', links: [['Web services', '/docs#web-services'], ['Private services', '/docs#private-services'], ['Background workers', '/docs#background-workers'], ['Cron jobs', '/docs#cron-jobs'], ['Static sites', '/docs#static-sites'], ['Postgres', '/docs#postgres'], ['Persistent disks', '/docs#persistent-disks'], ['Environment variables', '/docs#environment-variables']] }],
   [{ title: 'Features', links: [['Preview environments', '/docs#preview-environments'], ['Infrastructure as code', '/docs#infrastructure-as-code'], ['Zero-downtime deploys', '/docs#deploys'], ['Autoscaling', '/docs#scaling'], ['Custom domains', '/docs#custom-domains'], ['Private networking', '/docs#private-network'], ['Logs and metrics', '/docs#logs-and-metrics']] }],
   [{ title: 'Developers', links: [['Getting started', '/docs#getting-started'], ['Quickstarts', '/docs#quickstarts'], ['NAV CLI', '/docs#cli'], ['REST API', '/docs#rest-api'], ['Docker support', '/docs#docker'], ['Changelog', '/docs#changelog']] }],
-  [{ title: 'Resources', links: [['Pricing', '#pricing'], ['Examples', '/docs#quickstarts'], ['Architecture', '/docs#self-hosting'], ['FAQ', '/docs#faq'], ['Self-hosting guide', '/docs#self-hosting']] }],
+  [{ title: 'Resources', links: [['Pricing', '#pricing'], ['Examples', '/docs#examples'], ['Architecture', '/docs#architecture'], ['FAQ', '/docs#faq'], ['Self-hosting guide', '/docs#self-hosting']] }],
   [
-    { title: 'Runtimes', links: [['Node.js', '/docs#quickstarts'], ['Python', '/docs#quickstarts'], ['Go', '/docs#quickstarts'], ['Bun', '/docs#quickstarts'], ['Dockerfile', '/docs#docker']] },
-    { title: 'Platform', links: [['Control plane', '/docs#self-hosting'], ['Agent', '/docs#self-hosting'], ['Edge proxy', '/docs#self-hosting']] },
+    { title: 'Runtimes', links: [['Node.js', '/docs#runtime-node'], ['Python', '/docs#runtime-python'], ['Go', '/docs#runtime-go'], ['Bun', '/docs#runtime-bun'], ['Dockerfile', '/docs#dockerfile']] },
+    { title: 'Platform', links: [['Control plane', '/docs#control-plane'], ['Agent', '/docs#agent'], ['Edge proxy', '/docs#edge-proxy']] },
   ],
   [
     { title: 'Account', links: [['Sign up', '@start'], ['Log in', '/login']] },
-    { title: 'Trust', links: [['Security model', '/docs#security'], ['Hardened containers', '/docs#security'], ['Verified webhooks', '/docs#security']] },
+    { title: 'Trust', links: [['Security model', '/docs#security-model'], ['Hardened containers', '/docs#hardened-containers'], ['Verified webhooks', '/docs#verified-webhooks']] },
   ],
 ];
 
@@ -469,8 +469,9 @@ export function LandingPage() {
                   <div key={g.title} className="k-foot-group">
                     <h4>{g.title}</h4>
                     {g.links.map(([l, href]) => {
-                      const to = href === '@start' ? start : href;
-                      const label = href === '@start' ? (signedIn ? 'Dashboard' : 'Sign up') : l;
+                      // Signed-in visitors get their dashboard and account instead of sign-up / log-in.
+                      const to = href === '@start' ? start : signedIn && href === '/login' ? '/account' : href;
+                      const label = href === '@start' ? (signedIn ? 'Dashboard' : 'Sign up') : signedIn && href === '/login' ? 'Account settings' : l;
                       return to.startsWith('#') ? <a key={l} href={to}>{label}</a> : <Link key={l} to={to}>{label}</Link>;
                     })}
                   </div>

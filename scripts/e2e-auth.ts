@@ -3,6 +3,8 @@
 // token exchange, userinfo, account linking) using a mock OpenID provider this script runs on localhost.
 // The control plane must be started with:
 //   NAV_SSO_ISSUER=http://localhost:9431 NAV_SSO_CLIENT_ID=nav-test NAV_SSO_CLIENT_SECRET=nav-test-secret NAV_SSO_DOMAINS=sso.test
+//   NAV_GITLAB_URL=http://localhost:9431 NAV_GITLAB_CLIENT_ID=nav-test NAV_GITLAB_CLIENT_SECRET=nav-test-secret
+// (the mock also plays GitLab; Bitbucket must be left unconfigured)
 // Usage: node scripts/e2e-auth.ts
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -26,7 +28,7 @@ const idp = createServer(async (req, res) => {
   if (url.pathname === '/.well-known/openid-configuration') {
     return json(200, { issuer: IDP, authorization_endpoint: `${IDP}/authorize`, token_endpoint: `${IDP}/token`, userinfo_endpoint: `${IDP}/userinfo` });
   }
-  if (url.pathname === '/authorize') {
+  if (url.pathname === '/authorize' || url.pathname === '/oauth/authorize') {
     const q = url.searchParams;
     if (q.get('client_id') !== CLIENT.id || q.get('code_challenge_method') !== 'S256' || !q.get('code_challenge') || !q.get('state')) return json(400, { error: 'invalid_request' });
     const code = randomBytes(12).toString('hex');
@@ -37,7 +39,7 @@ const idp = createServer(async (req, res) => {
     res.writeHead(302, { location: back.toString() });
     return res.end();
   }
-  if (url.pathname === '/token' && req.method === 'POST') {
+  if ((url.pathname === '/token' || url.pathname === '/oauth/token') && req.method === 'POST') {
     idpTokenCalls++;
     let body = '';
     for await (const c of req) body += c;
@@ -51,6 +53,12 @@ const idp = createServer(async (req, res) => {
     const tok = randomBytes(16).toString('hex');
     tokens.set(tok, entry.email);
     return json(200, { access_token: tok, token_type: 'Bearer' });
+  }
+  if (url.pathname === '/api/v4/user') {
+    const email = tokens.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
+    if (!email) return json(401, { message: '401 Unauthorized' });
+    // Addresses starting with "unconfirmed" have never been confirmed on this GitLab.
+    return json(200, { id: Number.parseInt(createHash('sha256').update(email).digest('hex').slice(0, 8), 16), username: email.split('@')[0], name: email.split('@')[0], email, confirmed_at: email.startsWith('unconfirmed') ? null : '2026-01-01T00:00:00Z' });
   }
   if (url.pathname === '/userinfo') {
     const email = tokens.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
@@ -86,6 +94,24 @@ class Browser {
     try { data = text ? JSON.parse(text) : null; } catch { data = text; }
     return { status: res.status, data, location: res.headers.get('location') };
   }
+  /** OAuth round trip through the GitLab provider (start → mock GitLab → callback). */
+  async gitlab(email: string, opts: { dropStateCookie?: boolean; replayCode?: boolean } = {}) {
+    const s = await this.req('GET', `/auth/oauth/gitlab/start?login_hint=${encodeURIComponent(email)}`);
+    assert(s.status === 302 && s.location?.startsWith(`${IDP}/oauth/authorize`), `start should redirect to GitLab, got ${s.status} ${s.location}`);
+    const auth = new URL(s.location!);
+    assert(auth.searchParams.get('code_challenge_method') === 'S256' && auth.searchParams.get('state'), 'PKCE and state are sent');
+    const a = await this.req('GET', s.location!);
+    if (opts.dropStateCookie) this.jar.delete('nav_oauth');
+    const done = await this.req('GET', a.location!);
+    if (opts.replayCode) {
+      // A stolen callback URL replayed by someone else: no state cookie, and the code was already spent.
+      const thief = new Browser();
+      const again = await thief.req('GET', a.location!);
+      return { done, final: done.location ?? '', replay: again.location ?? '', thief };
+    }
+    return { done, final: done.location ?? '' };
+  }
+
   /** Runs an OAuth round trip: API start → IdP authorize → API callback. Returns the final dashboard redirect. */
   async sso(email: string, opts: { tamperState?: boolean; mode?: 'connect' } = {}) {
     const lookup = await this.req('POST', '/auth/sso', { email });
@@ -292,6 +318,66 @@ await step('delete account: needs typed email + password, removes the user', asy
   assert((await e.req('DELETE', '/auth/me', { confirm: email, password: 'bad-password' })).status === 403, 'wrong password should 403');
   assert((await e.req('DELETE', '/auth/me', { confirm: email, password: 'erin-pass-123' })).status === 204, 'delete failed');
   assert((await new Browser().req('POST', '/auth/login', { email, password: 'erin-pass-123' })).status === 401, 'deleted user can still sign in');
+});
+
+// ---- Provider sign-in: only authenticated, provider-verified users get a session ----
+
+await step('provider buttons: only configured providers can start a sign-in', async () => {
+  const cfg = await new Browser().req('GET', '/config');
+  assert(cfg.data.auth.providers.gitlab === true && cfg.data.auth.providers.bitbucket === false, `expected gitlab on, bitbucket off: ${JSON.stringify(cfg.data.auth.providers)}`);
+  const b = new Browser();
+  const r = await b.req('GET', '/auth/oauth/bitbucket/start');
+  assert(r.status === 302 && r.location?.includes('error=provider_disabled'), `unconfigured provider must not start: ${r.location}`);
+  assert(!b.jar.has('nav_session'), 'no session');
+  assert((await b.req('GET', '/auth/oauth/myspace/start')).status === 404, 'unknown providers 404');
+});
+
+await step('GitLab: confirmed account signs in through the full OAuth + PKCE round trip', async () => {
+  const b = new Browser();
+  const email = `gl.${run}@gitlab.test`;
+  const { final } = await b.gitlab(email);
+  assert(final.endsWith('/app'), `expected /app, got ${final}`);
+  const me = await b.req('GET', '/auth/me');
+  assert(me.status === 200 && me.data.user.email === email && me.data.user.emailVerified, `me: ${JSON.stringify(me.data)}`);
+});
+
+await step('GitLab: an unconfirmed email is refused and no account is created', async () => {
+  const b = new Browser();
+  const email = `unconfirmed.${run}@gitlab.test`;
+  const { final } = await b.gitlab(email);
+  assert(final.includes('error=unverified_email'), `expected unverified_email, got ${final}`);
+  assert(!b.jar.has('nav_session'), 'no session for an unconfirmed address');
+  // No account exists for that address: signing up with it still works.
+  const signup = await new Browser().req('POST', '/auth/signup', { email, password: 'some-password-1' });
+  assert(signup.status === 201, `no account should have been created, signup gave ${signup.status}`);
+});
+
+await step('GitLab: a callback without the state cookie is refused', async () => {
+  const b = new Browser();
+  const { final } = await b.gitlab(`nocookie.${run}@gitlab.test`, { dropStateCookie: true });
+  assert(final.includes('error=bad_state'), `expected bad_state, got ${final}`);
+  assert(!b.jar.has('nav_session'), 'no session');
+});
+
+await step('GitLab: a replayed callback URL does not sign anyone in', async () => {
+  const b = new Browser();
+  const { final, replay, thief } = await b.gitlab(`replay.${run}@gitlab.test`, { replayCode: true });
+  assert(final.endsWith('/app'), 'the real user got in');
+  assert(replay.includes('error=bad_state') && !thief.jar.has('nav_session'), `replay must fail: ${replay}`);
+});
+
+await step('provider sign-in still requires the second factor when 2FA is on', async () => {
+  const b = new Browser();
+  const email = `gl2fa.${run}@gitlab.test`;
+  await b.gitlab(email);
+  const setup = await b.req('POST', '/auth/mfa/setup');
+  const { codeAt } = await import('../apps/control/src/lib/totp.ts');
+  const code = codeAt(setup.data.secret, Math.floor(Date.now() / 30000));
+  assert((await b.req('POST', '/auth/mfa/enable', { code })).status === 200, 'enable 2FA');
+  const c = new Browser();
+  const { final } = await c.gitlab(email);
+  assert(final.endsWith('/login/mfa'), `expected the code step, got ${final}`);
+  assert((await c.req('GET', '/auth/me')).status === 401, 'no session until the code is entered');
 });
 
 idp.close();

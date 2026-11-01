@@ -111,13 +111,19 @@ await step('Key Value: create, credentials, settings; refuses cleanly without a 
   if (done.status === 'available') {
     const cred = await api('GET', `/key-value/${kv.id}/credentials`);
     assert(cred.internalUrl.startsWith('redis://default:'), 'connection string');
-    // Speak RESP: AUTH + PING.
+    // Speak RESP: AUTH, PING, then a write and a read back.
     const u = new URL(cred.internalUrl.replace(/@[^:]+:/, '@127.0.0.1:'));
-    const reply = await new Promise<string>((resolve, reject) => {
-      const s = net.connect(Number(u.port), '127.0.0.1', () => s.write(`AUTH ${cred.password}\r\nPING\r\n`));
-      let b = ''; s.on('data', (d) => { b += d; if (b.includes('PONG')) { s.end(); resolve(b); } }); s.on('error', reject);
+    const talk = (cmds: string, until: string) => new Promise<string>((resolve, reject) => {
+      const s = net.connect(Number(u.port), '127.0.0.1', () => s.write(cmds));
+      let b = '';
+      const t = setTimeout(() => { s.destroy(); resolve(b); }, 5000);
+      s.on('data', (d) => { b += d; if (b.includes(until)) { clearTimeout(t); s.end(); resolve(b); } });
+      s.on('error', reject);
     });
-    assert(reply.includes('+OK') && reply.includes('PONG'), `server replied ${reply}`);
+    const reply = await talk(`AUTH ${cred.password}\r\nPING\r\nSET nav:e2e works\r\nGET nav:e2e\r\n`, 'works');
+    assert(reply.includes('+OK') && reply.includes('PONG') && reply.includes('$5\r\nworks'), `server replied ${JSON.stringify(reply)}`);
+    const unauth = await talk('GET nav:e2e\r\n', '\r\n');
+    assert(/NOAUTH|-ERR|-WRONGPASS/.test(unauth), `a client without the password must be refused: ${JSON.stringify(unauth)}`);
   } else {
     const logs = await api('GET', `/key-value/${kv.id}/logs`);
     assert(done.status === 'failed' && logs.items.some((l: any) => /docker driver|valkey-server/.test(l.message)), 'clear failure when no server is available');

@@ -75,8 +75,8 @@ async function endpoints(p: Exclude<ProviderId, 'github'>): Promise<Endpoints> {
         scope: 'read_user',
         profile: async (t) => {
           const u = await getJson<{ id: number; username: string; name: string; email?: string; public_email?: string; avatar_url?: string; confirmed_at?: string | null }>(`${base}/api/v4/user`, t);
-          // GitLab's /user `email` is the primary address, which GitLab only allows once confirmed.
-          return { subject: String(u.id), email: u.email ?? null, emailVerified: !!u.email && u.confirmed_at !== null, name: u.name, username: u.username, avatarUrl: u.avatar_url ?? null };
+          // GitLab's /user `email` is the primary address; it counts only with a confirmation time.
+          return { subject: String(u.id), email: u.email ?? null, emailVerified: !!u.email && !!u.confirmed_at, name: u.name, username: u.username, avatarUrl: u.avatar_url ?? null };
         },
       };
     }

@@ -13,6 +13,7 @@ import { cn } from '@/lib/cn';
 import { copyText, downloadText } from '@/lib/misc';
 import { getTheme, setTheme, type Theme } from '@/lib/theme';
 import { useTitle } from '@/lib/useTitle';
+import QRCode from 'qrcode';
 import { PROVIDER_NAMES, ProviderIcon, oauthErrorMessage } from '../auth/providers';
 
 const SECTIONS = [
@@ -230,6 +231,21 @@ function SessionRow({ s, onRevoke, busy }: { s: SessionInfo; onRevoke: () => voi
 }
 
 /** "JBSWY3DPEHPK3PXP" -> "JBSW Y3DP EHPK 3PXP" for typing into an authenticator app. */
+/** The otpauth link as a QR code, drawn locally (the secret never leaves the browser). Dark modules on white, so
+ *  phone cameras read it in either theme. */
+function OtpQr({ url }: { url: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    QRCode.toString(url, { type: 'svg', errorCorrectionLevel: 'M', margin: 2, color: { dark: '#000000', light: '#ffffff' } })
+      .then((s) => { if (live) setSvg(s); })
+      .catch(() => { if (live) setSvg(null); });
+    return () => { live = false; };
+  }, [url]);
+  if (!svg) return null;
+  return <div role="img" aria-label="QR code for your authenticator app" className="mt-3 size-[184px] overflow-hidden border border-border-strong bg-white [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
 function groupSecret(secret: string): string {
   return secret.replace(/(.{4})/g, '$1 ').trim();
 }
@@ -303,7 +319,9 @@ function MfaSetupDialog({ open, onClose }: { open: boolean; onClose: () => void 
         <form onSubmit={submit} className="space-y-5">
           <ol className="list-decimal space-y-4 pl-5 text-[14px] text-fg">
             <li>
-              Add NAV to an authenticator app (1Password, Google Authenticator, Authy…) by entering this setup key:
+              Scan this code with an authenticator app (1Password, Google Authenticator, Authy…):
+              <OtpQr url={setup.data.otpauthUrl} />
+              <p className="mt-3 text-[13px] text-fg-muted">Can't scan it? Enter this setup key instead:</p>
               <div className="mt-2 flex items-center gap-2">
                 <code className="flex-1 border border-border-strong bg-surface-2 px-3 py-2 font-mono text-[15px] tracking-wider select-all">{groupSecret(setup.data.secret)}</code>
               </div>

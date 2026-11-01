@@ -55,19 +55,22 @@ export async function userRepos(userToken: string): Promise<GhRepo[]> {
   return gh<GhRepo[]>('/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member', { token: userToken });
 }
 
-export async function oauthExchange(code: string): Promise<{ token: string; user: { id: number; login: string; name: string | null; email: string | null; avatar_url: string } }> {
+/**
+ * Exchanges a GitHub authorization code (with its PKCE verifier) for a token and the user. `email` is only ever
+ * the account's primary address when GitHub marks it verified; otherwise it is null and sign-in is refused.
+ */
+export async function oauthExchange(code: string, verifier: string, redirectUri: string): Promise<{ token: string; user: { id: number; login: string; name: string | null; email: string | null; avatar_url: string } }> {
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ client_id: config.github.clientId, client_secret: config.github.clientSecret, code }),
+    body: JSON.stringify({ client_id: config.github.clientId, client_secret: config.github.clientSecret, code, code_verifier: verifier, redirect_uri: redirectUri }),
+    signal: AbortSignal.timeout(15_000),
   });
   const body = (await res.json()) as { access_token?: string; error_description?: string };
   if (!body.access_token) throw new Error(body.error_description ?? 'GitHub OAuth failed');
   const user = await gh<{ id: number; login: string; name: string | null; email: string | null; avatar_url: string }>('/user', { token: body.access_token });
-  if (!user.email) {
-    const emails = await gh<{ email: string; primary: boolean; verified: boolean }[]>('/user/emails', { token: body.access_token }).catch(() => []);
-    user.email = emails.find((e) => e.primary && e.verified)?.email ?? null;
-  }
+  const emails = await gh<{ email: string; primary: boolean; verified: boolean }[]>('/user/emails', { token: body.access_token }).catch(() => []);
+  user.email = emails.find((e) => e.primary && e.verified)?.email ?? null;
   return { token: body.access_token, user };
 }
 

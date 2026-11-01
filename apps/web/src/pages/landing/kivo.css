@@ -83,6 +83,8 @@
   color-scheme: light;
 }
 .k a { color: inherit; text-decoration: none; }
+/* In-page anchors (#pricing, #security, …) stop below the sticky 64px nav. */
+.k [id] { scroll-margin-top: 80px; }
 .k *:focus-visible { outline: 2px solid var(--k-violet); outline-offset: 2px; }
 .k ::selection { background: var(--k-violet); color: #fff; }
 

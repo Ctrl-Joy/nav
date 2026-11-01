@@ -38,22 +38,33 @@ function settings(kv: Row, port: number): string[] {
   ];
 }
 
-/** valkey-server, else redis-server, from PATH. */
-async function serverBinary(): Promise<string | null> {
-  for (const bin of ['valkey-server', 'redis-server']) {
-    const ok = await execFileP(isWin ? `${bin}.exe` : bin, ['--version'], { timeout: 5000 }).then(() => true, () => false);
-    if (ok) return bin;
+/**
+ * A Redis-compatible server for this node: NAV_KV_SERVER if set, else valkey-server or redis-server from PATH, else
+ * Memurai on Windows (PATH or its default install folder).
+ */
+async function serverBinary(): Promise<{ path: string; memurai: boolean } | null> {
+  const candidates = [
+    ...(process.env.NAV_KV_SERVER ? [process.env.NAV_KV_SERVER] : []),
+    ...['valkey-server', 'redis-server', ...(isWin ? ['memurai'] : [])].map((b) => (isWin ? `${b}.exe` : b)),
+    ...(isWin ? [path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Memurai', 'memurai.exe')] : []),
+  ];
+  for (const bin of candidates) {
+    const ok = await execFileP(bin, ['--version'], { timeout: 5000, windowsHide: true }).then(() => true, () => false);
+    if (ok) return { path: bin, memurai: /memurai/i.test(path.basename(bin)) };
   }
   return null;
 }
 
 async function startProcess(kv: Row, port: number): Promise<number> {
-  const bin = await serverBinary();
-  if (!bin) throw new Error('Key Value needs the docker driver, or valkey-server / redis-server on this node\'s PATH');
+  const server = await serverBinary();
+  if (!server) throw new Error('Key Value needs the docker driver, or valkey-server / redis-server (Memurai on Windows) on this node');
+  const bin = server.path;
   const dir = kvDir(kv.id);
   await mkdir(dir, { recursive: true });
   const conf = path.join(dir, 'kv.conf');
-  await writeFile(conf, [...settings(kv, port), `bind ${config.nodeBindIp}`, `dir ${dir.replace(/\\/g, '/')}`, 'daemonize no'].join('\n') + '\n', { mode: 0o600 });
+  // Memurai runs in the foreground already and does not accept the Unix-only daemonize option.
+  const lines = [...settings(kv, port), `bind ${config.nodeBindIp}`, `dir ${dir.replace(/\\/g, '/')}`, ...(server.memurai ? [] : ['daemonize no'])];
+  await writeFile(conf, lines.join('\n') + '\n', { mode: 0o600 });
   const child = spawn(bin, [conf], { cwd: dir, windowsHide: true, detached: !isWin });
   pipeLines(child.stdout!, (l) => kvLog(kv, l));
   pipeLines(child.stderr!, (l) => kvLog(kv, l, 'error'));

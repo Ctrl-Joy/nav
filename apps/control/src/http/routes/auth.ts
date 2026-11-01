@@ -289,12 +289,15 @@ export async function authRoutes(app: FastifyInstance) {
     if (!githubOAuthEnabled()) return reply.redirect(`${config.dashboardUrl}/login?error=provider_disabled&provider=github`);
     const { mode, next } = req.query as { mode?: string; next?: string };
     const state = randomBytes(16).toString('base64url');
-    writeOAuthState(req, reply, { p: 'github', s: state, v: '', m: mode === 'connect' && req.user ? 'connect' : 'login', n: safeNext(next) });
+    const { verifier, challenge } = pkcePair();
+    writeOAuthState(req, reply, { p: 'github', s: state, v: verifier, m: mode === 'connect' && req.user ? 'connect' : 'login', n: safeNext(next) });
     const url = new URL('https://github.com/login/oauth/authorize');
     url.searchParams.set('client_id', config.github.clientId);
     url.searchParams.set('redirect_uri', callbackUrl('github'));
     url.searchParams.set('scope', 'read:user user:email repo');
     url.searchParams.set('state', state);
+    url.searchParams.set('code_challenge', challenge);
+    url.searchParams.set('code_challenge_method', 'S256');
     return reply.redirect(url.toString());
   });
 
@@ -305,10 +308,10 @@ export async function authRoutes(app: FastifyInstance) {
     let token = '';
     let login = '';
     return finishOAuth(req, reply, 'github', st, async () => {
-      const gh = await oauthExchange(code);
+      const gh = await oauthExchange(code, st.v, callbackUrl('github'));
       token = gh.token;
       login = gh.user.login;
-      // GitHub only exposes verified addresses (public email must be verified; /user/emails filters on verified).
+      // Only the primary address GitHub marks verified is used (see oauthExchange).
       return { subject: String(gh.user.id), email: gh.user.email, emailVerified: !!gh.user.email, name: gh.user.name ?? gh.user.login, username: gh.user.login, avatarUrl: gh.user.avatar_url };
     }, async (userId) => {
       const subject = (await one('SELECT subject FROM user_identities WHERE user_id = $1 AND provider = $2', [userId, 'github']))?.subject;

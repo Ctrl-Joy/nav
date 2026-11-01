@@ -29,7 +29,8 @@
 .au-provider { height: 50px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 1px solid var(--au-line); background: transparent; color: var(--au-ink); font: inherit; font-size: 16px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .au-provider:hover { background: #1a1a1a; border-color: var(--au-line-hi); }
 .au-provider svg { width: 19px; height: 19px; flex-shrink: 0; }
-.au-provider[aria-disabled='true'] { color: var(--au-mute); }
+.au-provider[aria-disabled='true'] { color: var(--au-mute); opacity: 0.55; cursor: not-allowed; }
+.au-provider[aria-disabled='true']:hover { background: transparent; border-color: var(--au-line); }
 .au-provider[aria-disabled='true'] svg { opacity: 0.55; filter: grayscale(0.6); }
 .au-or { margin: 24px 0 30px; text-align: center; color: var(--au-ink); font-size: 15px; }
 .au-form { display: grid; gap: 24px; }
