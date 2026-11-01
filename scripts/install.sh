@@ -464,11 +464,16 @@ NoNewPrivileges=true"
 }
 
 check_ports_free() {
-  local port pids
+  local port pids pid ours
   for port in 80 443; do
     pids=$(ss -Hltnp "sport = :$port" 2>/dev/null || true)
     [[ -z $pids ]] && continue
-    if systemctl is-active --quiet nav-edge && grep -q '"node"' <<<"$pids"; then continue; fi
+    # Our own edge (on a re-run) is fine. Match it by its systemd unit: Node names its main thread "MainThread".
+    ours=1
+    for pid in $(grep -o 'pid=[0-9]*' <<<"$pids" | cut -d= -f2); do
+      grep -q 'nav-edge\.service' "/proc/$pid/cgroup" 2>/dev/null || ours=0
+    done
+    [[ $ours == 1 ]] && continue
     die "port $port is already in use: $pids
 Stop that service (for example: systemctl disable --now nginx apache2 caddy) and run the installer again."
   done
