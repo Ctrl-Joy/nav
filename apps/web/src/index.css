@@ -272,7 +272,6 @@
     background: var(--surface-2);
     border-color: var(--fg-subtle);
   }
-  [data-theme='light'] .nav-mark:not([data-theme='dark'] *) { filter: invert(1); }
 
   /* Flat panel (empty states, auth card). */
   .nv-panel {
@@ -309,3 +308,6 @@
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* Light theme: the mark's chevron turns ink while the violet slash keeps its colour (unlayered, so it beats text-white). */
+[data-theme='light'] .nav-mark:not([data-theme='dark'] *) { color: #0a0a0b; }

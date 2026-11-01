@@ -33,7 +33,7 @@
 .st-h { margin-top: 14px; font-family: var(--k-sans); font-weight: 400; font-size: clamp(32px, 3.4vw, 48px); line-height: 1.18; letter-spacing: -0.02em; color: var(--k-ink); text-wrap: balance; }
 .st-p { margin-top: 18px; font-size: clamp(16px, 1.3vw, 19px); line-height: 1.6; color: var(--k-text); max-width: 52ch; }
 .st-more { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--k-violet); white-space: nowrap; }
-.st-more:hover { color: #b394ff; }
+.st-more:hover { color: var(--k-violet-ink); }
 .st-more svg { width: 14px; height: 14px; transition: transform 0.2s; }
 .st-more:hover svg { transform: translateX(3px); }
 
@@ -58,7 +58,7 @@
 
 /* ------------------------------------------------ mock shells ------------------------------------------------ */
 .st-mock { width: 100%; font-family: var(--k-sans); }
-.st-win { width: 100%; height: 100%; border: 1px solid var(--k-line-2); border-radius: 2px; background: #0b0d0c; overflow: hidden; display: flex; flex-direction: column; }
+.st-win { width: 100%; height: 100%; border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-win); overflow: hidden; display: flex; flex-direction: column; }
 .st-win-bar { flex: none; height: 52px; display: flex; align-items: center; gap: 9px; padding: 0 18px; border-bottom: 1px solid var(--k-line-2); background: var(--k-panel); font-size: 14px; color: var(--k-ink); }
 .st-crumb { color: var(--k-dim); }
 .st-env { display: inline-flex; align-items: center; gap: 4px; }
@@ -72,7 +72,7 @@
 .st-panel { position: relative; width: 100%; height: 100%; border: 1px solid var(--k-line-2); border-radius: 2px; overflow: hidden; background: var(--k-panel); }
 
 /* Badges + cards: violet tiles like the hero board's service icons. */
-.st-badge { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 2px; background: var(--k-violet-soft); color: #c4a5ff; font-family: var(--k-mono); font-size: 10px; font-weight: 600; flex: none; }
+.st-badge { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 2px; background: var(--k-violet-soft); color: var(--k-violet-text); font-family: var(--k-mono); font-size: 10px; font-weight: 600; flex: none; }
 .st-badge-icon { color: var(--k-violet); }
 .st-badge-icon svg { width: 13px; height: 13px; }
 .st-badge-dot { width: 10px; height: 10px; margin: 0 6px; flex: none; }
@@ -85,13 +85,13 @@
 @keyframes st-rot { to { rotate: 360deg; } }
 
 /* --------------------------------------------- 1. architecture canvas --------------------------------------------- */
-.st-canvas { position: relative; flex: 1; background-color: #0b0d0c; background-image: radial-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1.4px); background-size: 22px 22px; }
+.st-canvas { position: relative; flex: 1; background-color: var(--k-win); background-image: radial-gradient(rgb(var(--k-tint) / 0.07) 1px, transparent 1.4px); background-size: 22px 22px; }
 .st-tools { position: absolute; left: 16px; top: 18px; display: grid; gap: 10px; z-index: 2; }
 .st-tools span { display: grid; place-items: center; gap: 12px; padding: 8px 6px; border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-panel); color: var(--k-text); }
 .st-tools svg { width: 14px; height: 14px; }
 .st-actions { position: absolute; right: 16px; top: 16px; display: flex; gap: 8px; z-index: 2; }
 .st-actions span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-panel); font-size: 13px; color: var(--k-ink); }
-.st-actions span:last-child { background: #fff; border-color: #fff; color: #09090b; }
+.st-actions span:last-child { background: var(--k-solid); border-color: var(--k-solid); color: var(--k-solid-ink); }
 .st-actions svg { width: 14px; height: 14px; }
 .st-scene-wrap { position: absolute; inset: 0; transition: opacity 0.4s ease, filter 0.4s ease; }
 .st-scene-wrap.out { opacity: 0; filter: blur(3px); }
@@ -111,7 +111,7 @@
 .st-group svg { width: 12px; height: 12px; }
 
 /* ---------------------------------------------- 2. private network ---------------------------------------------- */
-.st-panel-net { background: radial-gradient(70% 50% at 50% 100%, rgb(255 255 255 / 0.035), transparent 70%), var(--k-panel); }
+.st-panel-net { background: radial-gradient(70% 50% at 50% 100%, rgb(var(--k-tint) / 0.035), transparent 70%), var(--k-panel); }
 .st-card { position: absolute; border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-panel-2); padding: 18px 20px; }
 .st-net-top { left: 56px; right: 56px; top: 40px; }
 .st-net-bottom { left: 56px; right: 56px; bottom: 34px; }
@@ -137,21 +137,21 @@
 .st-sc-group { position: absolute; left: calc(50% - 120px); top: calc(50% - 56px); width: 240px; z-index: 3; transition: transform 0.45s cubic-bezier(0.3, 1.1, 0.5, 1); }
 .st-sc-main { position: relative; left: 0; top: 0; z-index: 1; }
 /* Hardware tray: rows of two memory sticks and four CPU chips, revealed by growing the tray's height. */
-.st-hw { position: relative; margin-top: -1px; overflow: hidden; border: 1px solid transparent; border-top: 0; background: #0b0d0c; transition: height 0.45s cubic-bezier(0.3, 1.1, 0.5, 1), border-color 0.3s ease; }
+.st-hw { position: relative; margin-top: -1px; overflow: hidden; border: 1px solid transparent; border-top: 0; background: var(--k-win); transition: height 0.45s cubic-bezier(0.3, 1.1, 0.5, 1), border-color 0.3s ease; }
 .st-hw[style*='height: 0'] { border-color: transparent; }
 .st-hw:not([style*='height: 0']) { border-color: color-mix(in srgb, var(--k-violet) 55%, transparent); box-shadow: 0 0 22px rgb(148 102 248 / 0.18); }
 .st-hw-row { height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 1px solid var(--k-line); }
 .st-hw-row:first-child { margin-top: 3px; }
-.st-ram { position: relative; width: 46px; height: 22px; display: flex; align-items: center; justify-content: center; gap: 3px; padding-bottom: 4px; border: 1px solid var(--k-violet); background: #241a40; }
-.st-ram i { width: 5px; height: 9px; background: #0b0d0c; box-shadow: inset 0 0 0 1px rgb(196 165 255 / 0.25); }
-.st-ram::after { content: ''; position: absolute; left: 3px; right: 3px; bottom: 2px; height: 2px; background: repeating-linear-gradient(90deg, #c4a5ff 0 2px, transparent 2px 4px); }
+.st-ram { position: relative; width: 46px; height: 22px; display: flex; align-items: center; justify-content: center; gap: 3px; padding-bottom: 4px; border: 1px solid var(--k-violet); background: color-mix(in srgb, var(--k-violet) 22%, var(--k-win)); }
+.st-ram i { width: 5px; height: 9px; background: var(--k-win); box-shadow: inset 0 0 0 1px rgb(196 165 255 / 0.25); }
+.st-ram::after { content: ''; position: absolute; left: 3px; right: 3px; bottom: 2px; height: 2px; background: repeating-linear-gradient(90deg, var(--k-violet-text) 0 2px, transparent 2px 4px); }
 .st-ram + .st-ram { margin-right: 4px; }
 .st-ram + .st-ram + .st-cpu { margin-left: 2px; }
-.st-cpu { position: relative; width: 22px; height: 22px; border: 1px solid #52525b; background: #18181b; outline: 1px dashed #3f3f46; outline-offset: 1px; }
-.st-cpu::after { content: ''; position: absolute; inset: 5px; border: 1px solid #71717a; background: #27272a; }
+.st-cpu { position: relative; width: 22px; height: 22px; border: 1px solid var(--k-line-3); background: var(--k-cpu); outline: 1px dashed var(--k-cpu-line); outline-offset: 1px; }
+.st-cpu::after { content: ''; position: absolute; inset: 5px; border: 1px solid var(--k-dim); background: var(--k-cpu-2); }
 
 /* ----------------------------------------------- 4. observability ----------------------------------------------- */
-.st-obs { flex: 1; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; background: #0b0d0c; }
+.st-obs { flex: 1; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--k-win); }
 .st-obs-bar { display: flex; justify-content: space-between; }
 .st-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--k-line-2); border-radius: 2px; font-size: 12.5px; color: var(--k-ink); }
 .st-chip svg { width: 13px; height: 13px; color: var(--k-text); }
@@ -159,7 +159,7 @@
 .st-obs-logs { border: 1px solid var(--k-line-2); border-radius: 2px; padding: 12px 14px; background: var(--k-panel); overflow: hidden; }
 .st-obs-head, .st-obs-row { display: grid; grid-template-columns: 150px 80px 1fr; gap: 14px; font-family: var(--k-mono); font-size: 11.5px; padding: 4px 8px; }
 .st-obs-head { color: var(--k-dim); }
-.st-obs-row { color: #fecaca; background: rgb(248 113 113 / 0.08); border-bottom: 1px solid rgb(248 113 113 / 0.16); white-space: nowrap; overflow: hidden; }
+.st-obs-row { color: var(--k-err-text); background: rgb(248 113 113 / 0.08); border-bottom: 1px solid rgb(248 113 113 / 0.16); white-space: nowrap; overflow: hidden; }
 .st-obs-row span:first-child, .st-obs-row span:nth-child(2) { color: var(--k-text); }
 .st-obs-row span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .st-obs-row.fresh { animation: st-row 0.7s ease; }
@@ -185,7 +185,7 @@
 
 /* ----------------------------------------------- 5. environments ----------------------------------------------- */
 .st-panel-env { padding: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end; }
-.st-envpane { border: 1px solid var(--k-line-2); border-radius: 2px; background: #0b0d0c; overflow: hidden; height: 330px; display: flex; flex-direction: column; }
+.st-envpane { border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-win); overflow: hidden; height: 330px; display: flex; flex-direction: column; }
 .st-envhead { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--k-line-2); background: var(--k-panel-2); font-family: var(--k-mono); font-size: 12.5px; color: var(--k-ink); flex: none; }
 .st-envhead svg { width: 14px; height: 14px; color: var(--k-text); }
 .st-envbody { position: relative; flex: 1; }
@@ -199,18 +199,18 @@
 .st-envdot { margin-left: auto; width: 8px; height: 8px; background: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
 .st-envswap { position: absolute; inset: 0; animation: st-swap 0.55s ease; }
 @keyframes st-swap { from { opacity: 0; filter: blur(4px); translate: 0 10px; } }
-.st-envcanvas { position: absolute; inset: 0; background-image: radial-gradient(rgb(255 255 255 / 0.06) 1px, transparent 1.4px); background-size: 16px 16px; }
+.st-envcanvas { position: absolute; inset: 0; background-image: radial-gradient(rgb(var(--k-tint) / 0.06) 1px, transparent 1.4px); background-size: 16px 16px; }
 .st-envedges { position: absolute; left: 0; top: 0; }
 .st-envedges path { fill: none; stroke: color-mix(in srgb, var(--k-violet) 40%, transparent); stroke-width: 1; stroke-dasharray: 4 4; animation: st-fade 0.5s ease; }
 .st-envnode { position: absolute; padding: 9px 10px 10px; border: 1px solid var(--k-line-2); border-radius: 2px; background: var(--k-panel-2); opacity: 0; scale: 0.84; transition: opacity 0.35s ease, scale 0.45s cubic-bezier(0.34, 1.55, 0.5, 1), border-color 0.5s ease, background 0.5s ease, box-shadow 0.5s ease; }
 .st-envnode.in { opacity: 1; scale: 1; }
-.st-envnode.hot { border-color: rgb(34 197 94 / 0.7); background: #0f2a19; box-shadow: 0 0 0 3px rgb(34 197 94 / 0.1), 0 0 20px rgb(34 197 94 / 0.16); }
+.st-envnode.hot { border-color: rgb(34 197 94 / 0.7); background: var(--k-hot); box-shadow: 0 0 0 3px rgb(34 197 94 / 0.1), 0 0 20px rgb(34 197 94 / 0.16); }
 .st-envnode-name { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--k-ink); }
 .st-envnode-name .st-badge { width: 17px; height: 17px; font-size: 8px; }
 .st-envnode-sub, .st-envnode-row { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-family: var(--k-mono); font-size: 9.5px; color: var(--k-text); white-space: nowrap; }
-.st-envnode-row { margin-top: 6px; padding: 4px 6px; background: #0b0d0c; border: 1px solid var(--k-line); }
+.st-envnode-row { margin-top: 6px; padding: 4px 6px; background: var(--k-win); border: 1px solid var(--k-line); }
 .st-envnode-sub svg, .st-envnode-row svg { width: 11px; height: 11px; flex: none; }
-.st-rollback { z-index: 3; position: absolute; left: 50%; top: 55%; translate: -50% -50%; width: 44px; height: 44px; border-radius: 2px; display: grid; place-items: center; background: #fff; color: #09090b; opacity: 0; scale: 0.6; transition: opacity 0.35s ease, scale 0.45s cubic-bezier(0.34, 1.6, 0.5, 1); }
+.st-rollback { z-index: 3; position: absolute; left: 50%; top: 55%; translate: -50% -50%; width: 44px; height: 44px; border-radius: 2px; display: grid; place-items: center; background: var(--k-solid); color: var(--k-solid-ink); opacity: 0; scale: 0.6; transition: opacity 0.35s ease, scale 0.45s cubic-bezier(0.34, 1.6, 0.5, 1); }
 .st-rollback.on { opacity: 1; scale: 1; }
 .st-rollback svg { width: 20px; height: 20px; }
 
@@ -230,3 +230,6 @@
   .st-envswap { animation: none; }
   .st-pill, .st-spin, .st-edges path { animation: none; }
 }
+
+/* Light theme: back panes of the environment deck only dim slightly (darkening white reads as muddy grey). */
+.k[data-theme='light'] .st-deckpane { filter: brightness(calc(1 - var(--depth) * 0.035)); }

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight, ArrowUp, Check, CheckCircle2, ChevronRight, Container,
   Database, Fingerprint, Globe, Layers, Lock,
-  Menu, Network, Plus, Search, Server, Users, Webhook, Workflow, X,
+  Menu, Moon, Network, Plus, Search, Server, Sun, Users, Webhook, Workflow, X,
 } from 'lucide-react';
 import { SERVICE_PLANS } from '@nav/shared';
 import { useMe } from '@/api/auth';
@@ -15,6 +15,7 @@ import { BrandIcon } from '@/components/BrandIcon';
 import { Github } from '@/components/GithubIcon';
 import { Logo } from '@/components/Logo';
 import { formatMemory } from '@/lib/format';
+import { useTheme } from '@/lib/theme';
 import { useTitle } from '@/lib/useTitle';
 import { Story } from './landing/Story';
 import './landing/kivo.css';
@@ -170,7 +171,8 @@ const FOOTER: FooterGroup[][] = [
   ],
 ];
 
-type FloatTile = { c: string; brand: SimpleIcon };
+/** `cl`: darker logo colour for the light theme, for brands whose own colour is near-white. */
+type FloatTile = { c: string; cl?: string; brand: SimpleIcon };
 
 /**
  * Tiles around the closing call to action, as mirrored left/right pairs ordered top to bottom.
@@ -181,10 +183,10 @@ const FLOAT_PAIRS: { x: number; y: number; s: number; tiles: [FloatTile, FloatTi
   { x: 14, y: 9, s: -0.6, tiles: [{ c: '#f05033', brand: siGit }, { c: '#ff3e00', brand: siSvelte }] },
   { x: 5, y: 23, s: 0.9, tiles: [{ c: '#2496ed', brand: siDocker }, { c: '#44b78b', brand: siDjango }] },
   { x: 13, y: 44, s: -1.1, tiles: [{ c: '#cc342d', brand: siRuby }, { c: '#8892bf', brand: siPhp }] },
-  { x: 25, y: 66, s: 0.7, tiles: [{ c: '#fbf0df', brand: siBun }, { c: '#dd0031', brand: siAngular }] },
+  { x: 25, y: 66, s: 0.7, tiles: [{ c: '#fbf0df', cl: '#3b2a1a', brand: siBun }, { c: '#dd0031', brand: siAngular }] },
   { x: 7, y: 77, s: -0.9, tiles: [{ c: '#5fa04e', brand: siNodedotjs }, { c: '#4fc08d', brand: siVuedotjs }] },
   { x: 40, y: 86, s: 1.0, tiles: [{ c: '#61dafb', brand: siReact }, { c: '#6b8fef', brand: siPostgresql }] },
-  { x: 21, y: 94, s: -0.5, tiles: [{ c: '#f0f0f0', brand: siGithub }, { c: '#dea584', brand: siRust }] },
+  { x: 21, y: 94, s: -0.5, tiles: [{ c: '#f0f0f0', cl: '#181717', brand: siGithub }, { c: '#dea584', brand: siRust }] },
 ];
 
 /**
@@ -247,6 +249,7 @@ function StartCta({ start, signedIn }: { start: string; signedIn: boolean }) {
                 top: `${pair.y}%`,
                 '--s': pair.s,
                 '--c': t.c,
+                ...(t.cl ? { '--cl': t.cl } : {}),
                 '--i': i,
                 '--j': FLOAT_PAIRS.length - 1 - i,
                 '--d': `${(i % 4) * -1.4}s`,
@@ -274,6 +277,8 @@ export function LandingPage() {
   const start = signedIn ? '/app' : '/signup';
   const rootRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState(false);
+  const [theme, toggleTheme] = useTheme();
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
   const [showTop, setShowTop] = useState(false);
   const [hourly, setHourly] = useState(false);
   const [open, setOpen] = useState(0);
@@ -307,7 +312,7 @@ export function LandingPage() {
       : <a key={label} href={href} className={cls} onClick={() => setMenu(false)}>{label}</a>;
 
   return (
-    <div ref={rootRef} className={`k${menu ? ' menu-open' : ''}`} data-theme="dark">
+    <div ref={rootRef} className={`k${menu ? ' menu-open' : ''}`} data-theme={theme}>
       <div className="k-grid-bg" aria-hidden="true" />
 
       <div className="k-announce">
@@ -320,6 +325,9 @@ export function LandingPage() {
           <Link to="/" className="k-brand" aria-label="NAV home"><Logo /></Link>
           <nav className="k-links" aria-label="Primary">{links.map(([l, h]) => navLink(l, h))}</nav>
           <div className="k-nav-right">
+            <button type="button" className="k-theme" onClick={toggleTheme} aria-label={themeLabel} title={themeLabel}>
+              {theme === 'dark' ? <Sun /> : <Moon />}
+            </button>
             <Link to="/docs" className="k-search"><Search /> Search docs <span className="k-kbd">Ctrl K</span></Link>
             {!signedIn && <Link to="/login" className="k-login">Log in</Link>}
             <Link to={start} className="k-cta-nav">{signedIn ? 'Dashboard' : 'Get started'} <ArrowRight /></Link>
@@ -332,6 +340,9 @@ export function LandingPage() {
       <div className="k-sheet" aria-hidden={!menu}>
         {links.map(([l, h]) => navLink(l, h))}
         {!signedIn && navLink('Log in', '/login')}
+        <button type="button" className="k-theme-row" onClick={toggleTheme}>
+          {theme === 'dark' ? <Sun /> : <Moon />} {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+        </button>
         <Link to={start} className="k-btn k-btn-solid" onClick={() => setMenu(false)}>{signedIn ? 'Open dashboard' : 'Get started'} <ArrowRight /></Link>
       </div>
 
