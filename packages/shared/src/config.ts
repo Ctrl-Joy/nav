@@ -66,6 +66,8 @@ export const config = {
     domains: (process.env.NAV_SSO_DOMAINS ?? '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean),
   },
   logRetentionDays: int('NAV_LOG_RETENTION_DAYS', 7),
+  /** Free web services spin down after this many minutes without inbound traffic; 0 disables sleeping. */
+  freeSleepMinutes: int('NAV_FREE_SLEEP_MINUTES', 15),
   /** Outgoing mail, e.g. smtps://user:pass@smtp.example.com:465. Unset: messages are written to <dataDir>/outbox. */
   smtpUrl: process.env.NAV_SMTP_URL ?? '',
   mailFrom: process.env.NAV_MAIL_FROM ?? 'NAV <no-reply@nav.localhost>',

@@ -42,6 +42,8 @@ export function service(r: Row): Service {
     prNumber: r.pr_number,
     suspended: r.suspended,
     maintenanceMode: r.maintenance_mode,
+    sleeping: r.sleeping ?? false,
+    lastRequestAt: r.last_request_at ?? null,
     ipAllowList: r.ip_allow_list ?? [],
     edgeCache: r.edge_cache ?? { enabled: false },
     shutdownDelaySeconds: r.shutdown_delay_s ?? 30,

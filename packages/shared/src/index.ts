@@ -144,6 +144,9 @@ export interface Service {
   prNumber: number | null;
   suspended: boolean;
   maintenanceMode: boolean;
+  /** Free web service spun down for inactivity; the next request wakes it. */
+  sleeping: boolean;
+  lastRequestAt: string | null;   // latest inbound HTTP request seen by the edge (batched, ~10 s granularity)
   ipAllowList: { cidr: string; description: string }[];
   edgeCache: { enabled: boolean; maxTtlSeconds?: number };
   shutdownDelaySeconds: number;

@@ -33,6 +33,8 @@ const edge = new Edge({
     const { rows } = await pool.query<{ key_auth: string }>('SELECT key_auth FROM acme_challenges WHERE token = $1', [token]);
     return rows[0]?.key_auth ?? null;
   },
+  // Any control replica LISTENing on nav_wake picks this up; waking an awake service is a no-op.
+  wake: async (serviceId) => { await pool.query("SELECT pg_notify('nav_wake', $1)", [serviceId]); },
   log,
 });
 

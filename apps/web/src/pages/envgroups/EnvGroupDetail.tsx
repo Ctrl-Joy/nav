@@ -10,6 +10,7 @@ import { ResourceIcon } from '@/components/ResourceIcon';
 import { RelativeTime } from '@/components/RelativeTime';
 import { Button, Card, CardBody, CardFooter, CardHeader, Empty, ErrorState, Input, PageHeader, Skeleton, StatusPill, useConfirm, useToast } from '@/components/ui';
 import { useWorkspace } from '@/layouts/WorkspaceContext';
+import { serviceStatus } from '@/lib/misc';
 import { useTitle } from '@/lib/useTitle';
 
 function sameVars(a: EnvVar[], b: EnvVar[]) {
@@ -184,7 +185,7 @@ export function EnvGroupDetailPage() {
                 <Link to={`/w/${ws}/services/${s.id}`} className="flex-1 truncate text-[13px] font-medium text-fg hover:underline">
                   {s.name}
                 </Link>
-                <StatusPill status={s.status} />
+                <StatusPill status={serviceStatus(s)} />
               </li>
             ))}
             {g.serviceIds.length > linked.length && !services.isPending && (

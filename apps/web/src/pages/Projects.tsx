@@ -27,6 +27,7 @@ import {
   useToast,
 } from '@/components/ui';
 import { useWorkspace } from '@/layouts/WorkspaceContext';
+import { serviceStatus } from '@/lib/misc';
 import { useTitle } from '@/lib/useTitle';
 
 type Resource = { kind: 'service'; item: Service } | { kind: 'database'; item: Database };
@@ -165,7 +166,7 @@ function ResourceLine({ r, ws }: { r: Resource; ws: string }) {
       <Link to={href} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-surface-2">
         <ResourceIcon kind={r.kind === 'service' ? r.item.type : 'postgres'} className="size-6" />
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{r.item.name}</span>
-        <StatusPill status={r.item.status} />
+        <StatusPill status={r.kind === 'service' ? serviceStatus(r.item) : r.item.status} />
       </Link>
     </li>
   );

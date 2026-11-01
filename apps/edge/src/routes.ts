@@ -27,6 +27,8 @@ export interface Route {
   edgeCache: { enabled: boolean; maxTtlSeconds: number };
   /** Changes on every deploy or purge; cached responses from an older value are dropped. */
   cacheVersion: string;
+  /** A free instance spun down for inactivity; the next request wakes it. */
+  sleeping: boolean;
 }
 
 /** Row shape of the `edge_routes` view (snake_case, json columns may arrive parsed or as text). */
@@ -46,6 +48,7 @@ export interface EdgeRouteRow {
   edge_cache?: unknown;
   cache_epoch?: number | null;
   deploy_id?: string | null;
+  sleeping?: boolean | null;
 }
 
 export interface HostMatch { route: Route; redirectTo: string | null; host: string }
@@ -79,6 +82,7 @@ export function normalizeRow(row: EdgeRouteRow): Route {
       return { enabled: c.enabled === true, maxTtlSeconds: Math.min(Math.max(Number(c.maxTtlSeconds) || 86400, 1), 31536000) };
     })(),
     cacheVersion: `${row.deploy_id ?? ''}:${row.cache_epoch ?? 0}`,
+    sleeping: row.sleeping === true,
     domains: arr<DomainEntry>(row.domains)
       .filter((d) => d && typeof d.domain === 'string')
       .map((d) => ({ domain: d.domain.toLowerCase().replace(/\.$/, ''), redirectTo: d.redirectTo ? String(d.redirectTo).toLowerCase() : null })),

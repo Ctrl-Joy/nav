@@ -36,7 +36,7 @@ export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<
   }
 }
 
-export type Channel = 'nav_logs' | 'nav_changes' | 'nav_routes';
+export type Channel = 'nav_logs' | 'nav_changes' | 'nav_routes' | 'nav_wake';
 
 export async function notify(channel: Channel, payload: string | object = ''): Promise<void> {
   const text = typeof payload === 'string' ? payload : JSON.stringify(payload);

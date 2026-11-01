@@ -21,6 +21,7 @@ import {
 } from '@/components/ui';
 import { useWorkspace } from '@/layouts/WorkspaceContext';
 import { hostnameOf, repoSlug } from '@/lib/format';
+import { FREE_SLEEP_NOTE, serviceStatus } from '@/lib/misc';
 import { useTitle } from '@/lib/useTitle';
 import { HAS_URL, SHELL_TYPES, type ServiceOutletCtx } from './context';
 
@@ -142,7 +143,7 @@ export function ServiceLayout() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-[24px] leading-tight font-normal tracking-[-0.02em] md:text-[28px]">{service.name}</h1>
-              <StatusPill status={service.status} />
+              <StatusPill status={serviceStatus(service)} />
               {service.maintenanceMode && <StatusPill status="suspended" label="Maintenance" />}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-subtle">
@@ -165,6 +166,7 @@ export function ServiceLayout() {
               )}
               {!service.url && service.internalAddress && <span className="font-mono">{service.internalAddress}</span>}
             </div>
+            {service.type === 'web' && plan === 'free' && <p className="mt-1.5 text-xs text-fg-subtle">Free instance: {FREE_SLEEP_NOTE}</p>}
           </div>
         </div>
         {canWrite && (

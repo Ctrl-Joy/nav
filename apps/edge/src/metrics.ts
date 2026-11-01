@@ -1,4 +1,5 @@
-// Per-service, per-minute HTTP metrics, flushed to `http_metrics` every 10 s.
+// Per-service, per-minute HTTP metrics, flushed to `http_metrics` every 10 s, together with each service's
+// latest request time (`services.last_request_at`, which drives free instance sleep).
 // Failures are logged and never propagate to request handling.
 
 export interface Bucket {
@@ -22,6 +23,8 @@ const MAX_BUCKETS = 20_000;
 
 export class Metrics {
   private buckets = new Map<string, Bucket>();
+  /** serviceId -> time of its latest request since the last flush. */
+  private lastSeen = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
   private flushing: Promise<void> | null = null;
   private db: Queryable | null;
@@ -34,6 +37,8 @@ export class Metrics {
 
   record(serviceId: string, status: number, latencyMs: number, bytesOut: number, now = Date.now()): void {
     try {
+      const seen = this.lastSeen.get(serviceId);
+      if (seen === undefined ? this.lastSeen.size < MAX_BUCKETS : seen < now) this.lastSeen.set(serviceId, now);
       const minute = new Date(now - (now % 60_000)).toISOString();
       const key = `${serviceId}|${minute}`;
       let b = this.buckets.get(key);
@@ -69,12 +74,27 @@ export class Metrics {
 
   async flush(): Promise<void> {
     if (this.flushing) return this.flushing;
-    if (!this.db || this.buckets.size === 0) return;
+    if (!this.db || (this.buckets.size === 0 && this.lastSeen.size === 0)) return;
     const batch = [...this.buckets.values()];
     this.buckets = new Map();
+    const seen = [...this.lastSeen];
+    this.lastSeen = new Map();
     const db = this.db;
     let written = 0;
     this.flushing = (async () => {
+      if (seen.length) {
+        try {
+          await db.query(
+            `UPDATE services s SET last_request_at = v.t FROM unnest($1::text[], $2::timestamptz[]) AS v(id, t)
+             WHERE s.id = v.id AND (s.last_request_at IS NULL OR s.last_request_at < v.t)`,
+            [seen.map(([id]) => id), seen.map(([, t]) => new Date(t).toISOString())],
+          );
+        } catch (err) {
+          this.log(`[edge] last-request flush failed: ${(err as Error).message}`);
+          for (const [id, t] of seen) if ((this.lastSeen.get(id) ?? 0) < t) this.lastSeen.set(id, t);
+        }
+      }
+      if (!batch.length) return;
       try {
         for (let i = 0; i < batch.length; i += 500) {
           const chunk = batch.slice(i, i + 500);

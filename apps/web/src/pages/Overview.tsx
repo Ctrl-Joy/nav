@@ -31,6 +31,7 @@ import {
 import { useWorkspace } from '@/layouts/WorkspaceContext';
 import { cn } from '@/lib/cn';
 import { hostnameOf, repoSlug, titleCase } from '@/lib/format';
+import { serviceStatus } from '@/lib/misc';
 import { useTitle } from '@/lib/useTitle';
 import { Onboarding } from './Onboarding';
 import { CreateProjectDialog } from './Projects';
@@ -58,7 +59,7 @@ function serviceRow(ws: string, s: Service, deploy: Deploy | undefined): Row {
     kind: s.type,
     name: s.name,
     sub: s.repoUrl ? `${repoSlug(s.repoUrl)}${s.branch ? ` · ${s.branch}` : ''}` : s.imageUrl ?? s.slug,
-    status: s.status,
+    status: serviceStatus(s),
     runtime: s.runtime === 'auto' ? 'Auto' : titleCase(s.runtime),
     plan: s.plan,
     environmentId: s.environmentId,

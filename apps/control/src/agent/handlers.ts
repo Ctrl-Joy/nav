@@ -167,7 +167,8 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
 
     // ---- Update -------------------------------------------------------------------------------------
     await setDeploy(deploy.id, { status: 'update_in_progress' }, ws, svc.id);
-    const fresh = (await one('SELECT * FROM services WHERE id = $1', [svc.id]))!;
+    // Deploying wakes a sleeping free instance (it gets a fresh idle period from the deploy going live).
+    const fresh = (await one('UPDATE services SET sleeping = false WHERE id = $1 RETURNING *', [svc.id]))!;
     const old = await activeInstances(svc.id);
     if (['web', 'private', 'worker'].includes(svc.type) && !fresh.suspended) {
       const count = Math.max(1, fresh.instance_count);
@@ -246,7 +247,8 @@ export async function handleScale(_ctx: Ctx, payload: { serviceId: string }): Pr
   const svc = await one('SELECT * FROM services WHERE id = $1', [payload.serviceId]);
   if (!svc || !['web', 'private', 'worker'].includes(svc.type)) return;
   const current = await activeInstances(svc.id);
-  if (svc.suspended || svc.status === 'deleting' || !svc.current_deploy_id) {
+  // A sleeping free instance runs nothing until the edge wakes it (lib/sleep.ts).
+  if (svc.suspended || svc.sleeping || svc.status === 'deleting' || !svc.current_deploy_id) {
     await stopInstances(current.map((r) => r.id), 10_000, true);
     return;
   }

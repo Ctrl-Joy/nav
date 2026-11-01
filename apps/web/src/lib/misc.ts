@@ -16,6 +16,13 @@ export function writeLocal(key: string, value: string): void {
 
 export const LAST_WORKSPACE_KEY = 'nav.lastWorkspace';
 
+/** Status to show for a service: a live free instance that spun down for inactivity reads "sleeping". */
+export function serviceStatus(s: { status: string; sleeping?: boolean; suspended?: boolean }): string {
+  return s.sleeping && !s.suspended && s.status === 'live' ? 'sleeping' : s.status;
+}
+
+export const FREE_SLEEP_NOTE = 'Spins down after 15 minutes without traffic; the next request wakes it, which takes a few seconds.';
+
 export function downloadText(filename: string, text: string, type = 'text/plain'): void {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
