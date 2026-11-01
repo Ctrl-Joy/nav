@@ -1,8 +1,12 @@
 import type { Plan, SecretFile, Disk } from '@nav/shared';
+import type { StoredArtifact } from '@nav/shared/artifacts';
+
+/** `nodeId` is the node that built it; `store` is set once it has been uploaded for other nodes to fetch. */
+interface Placed { nodeId?: string; store?: StoredArtifact }
 
 export type Artifact =
-  | { kind: 'dir'; root: string; path: string; runtime: string; startCommand: string | null }
-  | { kind: 'image'; ref: string; startCommand: string | null };
+  | ({ kind: 'dir'; root: string; path: string; runtime: string; startCommand: string | null } & Placed)
+  | ({ kind: 'image'; ref: string; startCommand: string | null } & Placed);
 
 export interface BuildContext {
   deployId: string;
@@ -52,5 +56,9 @@ export interface Driver {
   adopt?(ref: string, onLog: (line: string) => void): Promise<Handle | null>;
   usage(refs: string[]): Promise<Map<string, Usage>>;
   removeArtifact(artifact: Artifact): Promise<void>;
+  /** Image transport between nodes (docker). */
+  hasImage?(ref: string): Promise<boolean>;
+  saveImage?(ref: string): Promise<NodeJS.ReadableStream>;
+  loadImage?(tar: NodeJS.ReadableStream): Promise<void>;
   removeServiceData?(serviceId: string): Promise<void>;
 }

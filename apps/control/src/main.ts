@@ -4,6 +4,7 @@ import { migrate } from './db/migrate.ts';
 import { pool } from './db/pool.ts';
 import { buildApp } from './http/app.ts';
 import { startScheduler } from './scheduler/index.ts';
+import { startControlJobs } from './scheduler/jobs.ts';
 import { startNotifier } from './scheduler/notifier.ts';
 
 if (!process.env.NAV_MASTER_KEY) {
@@ -17,6 +18,7 @@ await app.listen({ port: config.apiPort, host: process.env.NAV_API_HOST ?? '127.
 console.log(`[control] API listening on http://localhost:${config.apiPort}/api/v1`);
 startScheduler();
 startNotifier();
+startControlJobs();
 
 const shutdown = async () => {
   await app.close().catch(() => {});

@@ -1,5 +1,6 @@
 // NAV local launcher: boots the platform Postgres, applies migrations and runs control, agent, edge and web
-// with prefixed, colored output. Usage: npm run dev  (flags: --no-web, --only=control,agent)
+// with prefixed, colored output. Usage: npm run dev  (flags: --no-web, --only=control,agent, --agents=2)
+// --agents=N runs N agents, each a separate node with its own data directory, to exercise a multi-node cluster.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -13,6 +14,7 @@ const envFile = path.join(dataDir, 'platform.env');
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith('--only='))?.slice(7).split(',');
 const noWeb = args.includes('--no-web');
+const agentCount = Math.max(1, Number(args.find((a) => a.startsWith('--agents='))?.slice(9) ?? 1));
 
 async function loadOrCreateEnv(): Promise<Record<string, string>> {
   await mkdir(dataDir, { recursive: true });
@@ -66,12 +68,17 @@ await migrate();
 await pool.end();
 
 const colors = ['\x1b[36m', '\x1b[35m', '\x1b[33m', '\x1b[32m', '\x1b[34m'];
-const procs: { name: string; cmd: string; args: string[]; cwd: string }[] = [
+const procs: { name: string; cmd: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv }[] = [
   { name: 'control', cmd: process.execPath, args: ['src/main.ts'], cwd: path.join(root, 'apps/control') },
   { name: 'agent', cmd: process.execPath, args: ['src/agent/main.ts'], cwd: path.join(root, 'apps/control') },
   { name: 'edge', cmd: process.execPath, args: ['src/main.ts'], cwd: path.join(root, 'apps/edge') },
   { name: 'web', cmd: process.execPath, args: [path.join(root, 'node_modules/vite/bin/vite.js'), '--port', '5180', '--strictPort'], cwd: path.join(root, 'apps/web') },
-].filter((p) => (only ? only.includes(p.name) : !(noWeb && p.name === 'web')));
+  // Extra nodes: same platform database, separate data directories (so builds really move through the store).
+  ...Array.from({ length: agentCount - 1 }, (_, i) => ({
+    name: `agent${i + 2}`, cmd: process.execPath, args: ['src/agent/main.ts'], cwd: path.join(root, 'apps/control'),
+    env: { NAV_DATA_DIR: path.join(dataDir, 'nodes', String(i + 2)) },
+  })),
+].filter((p) => (only ? only.includes(p.name.replace(/d+$/, '')) : !(noWeb && p.name === 'web')));
 
 // Refuse to start if another program already owns one of our ports (on Windows a second process can bind the
 // same port on a different address, silently shadowing ours).
@@ -91,7 +98,7 @@ for (const [name, port] of ports) {
 const children: ChildProcess[] = [];
 procs.forEach((p, i) => {
   const color = colors[i % colors.length];
-  const child = spawn(p.cmd, p.args, { cwd: p.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(p.cmd, p.args, { cwd: p.cwd, env: { ...env, ...p.env }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   const prefix = `${color}${p.name.padEnd(7)}\x1b[0m│ `;
   const pipe = (s: NodeJS.ReadableStream) => {

@@ -15,6 +15,7 @@ import { databaseRoutes } from './routes/databases.ts';
 import { envGroupRoutes } from './routes/envgroups.ts';
 import { blueprintRoutes } from './routes/blueprints.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
+import { internalRoutes } from './routes/internal.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
@@ -90,6 +91,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     { prefix: '/api/v1' },
   );
+
+  await app.register(internalRoutes, { prefix: '/internal/v1' });
 
   app.setNotFoundHandler(async (req, reply) => {
     if (req.url.startsWith('/api/')) return reply.status(404).send({ error: { code: 'not_found', message: 'route not found' } });

@@ -2,6 +2,7 @@
 // Exercises the real API, agent, edge and Postgres: deploys, scaling, zero-downtime env changes, rollbacks,
 // crash recovery, static sites, workers, cron, databases + backup/restore, custom domains + TLS, hooks, blueprints.
 // Usage: node scripts/e2e.ts [--only=web,db] [--keep]
+// Against a multi-node stack (npm run dev -- --agents=2) set NAV_E2E_NODES=2 to also check replica spreading.
 import { request as httpsRequest } from 'node:https';
 
 const API = process.env.NAV_API ?? 'http://localhost:4000/api/v1';
@@ -10,6 +11,7 @@ const GIT = process.env.NAV_GIT ?? 'http://localhost:9420';
 const APPS_DOMAIN = process.env.NAV_APPS_DOMAIN ?? 'nav.localhost';
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice(7).split(',');
 const keep = process.argv.includes('--keep');
+const NODES = Number(process.env.NAV_E2E_NODES ?? 1);
 
 let token = '';
 let ws = '';
@@ -169,6 +171,12 @@ await step('scaling: 2 instances behind the load balancer', 'web', async () => {
   const seen = new Set<string>();
   for (let i = 0; i < 8; i++) seen.add((await (await edge(web.slug, '/')).json()).instance);
   assert(seen.size === 2, `expected round-robin across 2 instances, saw ${seen.size}`);
+  if (NODES > 1) {
+    // Two nodes: the replicas land on different nodes, so one of them runs a build fetched from the store.
+    const healthy = (await api('GET', `/services/${web.id}/instances`)).items.filter((i: any) => i.status === 'healthy');
+    const nodes = new Set(healthy.map((i: any) => i.nodeId));
+    assert(nodes.size === 2, `expected replicas on 2 nodes, got ${[...nodes].join(', ')}`);
+  }
 });
 
 let v2: any;

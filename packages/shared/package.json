@@ -7,6 +7,13 @@
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
     "./crypto": "./src/crypto.ts",
-    "./ids": "./src/ids.ts"
+    "./ids": "./src/ids.ts",
+    "./artifacts": "./src/artifacts.ts"
+  },
+  "dependencies": {
+    "tar-stream": "3.2.2"
+  },
+  "devDependencies": {
+    "@types/tar-stream": "3.1.5"
   }
 }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import Docker from 'dockerode';
 import tar from 'tar-stream';
+import { config } from '@nav/shared/config';
 import { pipeLines } from '../util.ts';
 import type { Artifact, BuildContext, Driver, Handle, StartSpec, Usage } from './types.ts';
 
@@ -164,7 +165,7 @@ export function dockerDriver(): Driver {
     const exited = container.wait().then((r: { StatusCode: number }) => r.StatusCode).catch(() => 1);
     return {
       ref,
-      host: '127.0.0.1',
+      host: config.nodeAddress,
       port,
       exited,
       async stop(graceMs) {
@@ -233,7 +234,7 @@ export function dockerDriver(): Driver {
         ExposedPorts: spec.oneOff ? undefined : { [`${containerPort}/tcp`]: {} },
         HostConfig: {
           NetworkMode: network,
-          PortBindings: spec.oneOff ? undefined : { [`${containerPort}/tcp`]: [{ HostIp: '127.0.0.1', HostPort: '' }] },
+          PortBindings: spec.oneOff ? undefined : { [`${containerPort}/tcp`]: [{ HostIp: config.nodeBindIp, HostPort: '' }] },
           Memory: spec.plan.memoryMB * 1024 * 1024,
           MemorySwap: spec.plan.memoryMB * 1024 * 1024,
           NanoCpus: Math.round(spec.plan.cpu * 1e9),
@@ -288,6 +289,19 @@ export function dockerDriver(): Driver {
 
     async removeArtifact(artifact: Artifact) {
       if (artifact.kind === 'image' && artifact.ref.startsWith('nav/')) await docker.getImage(artifact.ref).remove({ force: true }).catch(() => {});
+    },
+
+    async hasImage(ref) {
+      return Boolean(await docker.getImage(ref).inspect().catch(() => null));
+    },
+
+    async saveImage(ref) {
+      return docker.getImage(ref).get();
+    },
+
+    async loadImage(stream) {
+      const out = await docker.loadImage(stream);
+      await followProgress(docker, out, () => {});
     },
 
     async removeServiceData(serviceId) {

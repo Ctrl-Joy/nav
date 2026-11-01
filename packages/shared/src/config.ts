@@ -23,6 +23,15 @@ export const config = {
   publicPortSuffix: process.env.NAV_PUBLIC_PORT_SUFFIX ?? `:${int('NAV_EDGE_HTTP_PORT', 7080)}`,
   publicScheme: process.env.NAV_PUBLIC_SCHEME ?? 'http',
   driver: (process.env.NAV_DRIVER ?? 'auto') as 'auto' | 'docker' | 'process',
+  /** Where agents and the edge reach the control plane's internal API (artifact store). */
+  controlUrl: (process.env.NAV_CONTROL_URL ?? `http://127.0.0.1:${int('NAV_API_PORT', 4000)}`).replace(/\/+$/, ''),
+  /** Address other nodes and the edge use to reach instances on this node (its private IP in a cluster). */
+  nodeAddress: process.env.NAV_NODE_ADDRESS ?? '127.0.0.1',
+  /** Interface instance ports are published on. Keep it private: the edge is the only public entry point. */
+  nodeBindIp: process.env.NAV_NODE_BIND_IP ?? process.env.NAV_NODE_ADDRESS ?? '127.0.0.1',
+  /** 'auto' uploads builds to the artifact store once the cluster has more than one node; 'always' / 'never'. */
+  artifactUpload: (process.env.NAV_ARTIFACT_UPLOAD ?? 'auto') as 'auto' | 'always' | 'never',
+  artifactMaxBytes: int('NAV_ARTIFACT_MAX_MB', 4096) * 1048576,
   acmeDirectory: process.env.NAV_ACME_DIRECTORY ?? 'https://acme-staging-v02.api.letsencrypt.org/directory',
   acmeEmail: process.env.NAV_ACME_EMAIL ?? '',
   github: {

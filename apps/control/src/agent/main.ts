@@ -5,11 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { config } from '@nav/shared/config';
 import { id } from '@nav/shared/ids';
-import { pool, q } from '../db/pool.ts';
+import { one, pool, q } from '../db/pool.ts';
+import { enqueue } from '../lib/core.ts';
 import { migrate } from '../db/migrate.ts';
 import { notify } from '../db/pool.ts';
 import { handleDbBackup, handleDbDelete, handleDbProvision, handleDbReconfigure, handleDbRestart, handleDbRestore, handleDbResume, handleDbSuspend, monitorDatabases, recoverDatabases } from './databases.ts';
-import { handleBlueprintSync, handleDeleteService, handleDeploy, handleIssueCert, handleRestart, handleRun, handleScale, handleStop, handleVerifyDomain, type Ctx } from './handlers.ts';
+import { handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
+import { CONTROL_JOBS } from '../scheduler/jobs.ts';
+import { liveNodes } from './cluster.ts';
 import { InstanceManager } from './instances.ts';
 import { dockerAvailable, dockerDriver } from './runtime/docker.ts';
 import { processDriver } from './runtime/process.ts';
@@ -22,6 +25,11 @@ if (!process.env.NAV_MASTER_KEY) {
 }
 
 const MAX_CONCURRENT = Number(process.env.NAV_AGENT_CONCURRENCY ?? 4);
+/** Instance start/stop and cleanup jobs run in their own lane: deploys elsewhere wait on them, so they must
+ *  never queue behind those deploys. */
+const NODE_LANE = ['instance_start', 'instance_stop', 'node_cleanup'];
+const NODE_LANE_CONCURRENCY = 32;
+const VERSION = '0.1.0';
 
 async function nodeId(): Promise<string> {
   const file = path.join(config.dataDir, 'node-id');
@@ -50,9 +58,10 @@ const HANDLERS: Record<string, Handler> = {
   stop_service: handleStop,
   delete_service: handleDeleteService,
   run: handleRun,
-  verify_domain: handleVerifyDomain,
-  issue_cert: handleIssueCert,
   blueprint_sync: handleBlueprintSync,
+  instance_start: handleInstanceStart,
+  instance_stop: handleInstanceStop,
+  node_cleanup: handleNodeCleanup,
   db_provision: handleDbProvision,
   db_reconfigure: handleDbReconfigure,
   db_suspend: handleDbSuspend,
@@ -63,8 +72,12 @@ const HANDLERS: Record<string, Handler> = {
   db_restore: handleDbRestore,
 };
 
-/** Atomically claims the next runnable job, honouring per-key concurrency. */
-async function claim(nid: string): Promise<{ id: number; kind: string; payload: any; attempts: number; max_attempts: number } | null> {
+/**
+ * Atomically claims the next runnable job of a lane, honouring per-key concurrency. A job naming a node is only
+ * claimed by that node; database jobs follow the node that holds the database; a draining node takes no new
+ * untargeted work.
+ */
+async function claim(nid: string, nodeLane: boolean, draining: boolean): Promise<{ id: number; kind: string; payload: any; attempts: number; max_attempts: number } | null> {
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -73,10 +86,13 @@ async function claim(nid: string): Promise<{ id: number; kind: string; payload: 
       `UPDATE jobs SET status = 'running', locked_by = $1, locked_at = now(), attempts = attempts + 1
        WHERE id = (
          SELECT j.id FROM jobs j WHERE j.status = 'queued' AND j.run_at <= now()
+           AND (j.kind = ANY($2)) = $3 AND NOT (j.kind = ANY($5))
+           AND (j.node_id = $1 OR (j.node_id IS NULL AND NOT $4))
+           AND NOT (j.kind LIKE 'db\\_%' AND EXISTS (SELECT 1 FROM databases d WHERE d.id = j.payload->>'databaseId' AND d.node_id IS NOT NULL AND d.node_id <> $1))
            AND (j.concurrency_key IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status = 'running' AND r.concurrency_key = j.concurrency_key))
          ORDER BY j.id FOR UPDATE SKIP LOCKED LIMIT 1)
        RETURNING id, kind, payload, attempts, max_attempts`,
-      [nid],
+      [nid, NODE_LANE, nodeLane, draining, CONTROL_JOBS],
     );
     await c.query('COMMIT');
     return res.rows[0] ?? null;
@@ -97,17 +113,24 @@ async function main() {
   process.env.NAV_ACTIVE_DRIVER = driver.name;
 
   await q(
-    `INSERT INTO nodes (id, hostname, driver, capacity, last_heartbeat) VALUES ($1,$2,$3,$4,now())
-     ON CONFLICT (id) DO UPDATE SET hostname = EXCLUDED.hostname, driver = EXCLUDED.driver, capacity = EXCLUDED.capacity, last_heartbeat = now()`,
-    [nid, os.hostname(), driver.name, { cpus: os.cpus().length, memoryMB: Math.round(os.totalmem() / 1048576) }],
+    `INSERT INTO nodes (id, hostname, driver, address, capacity, version, last_heartbeat) VALUES ($1,$2,$3,$4,$5,$6,now())
+     ON CONFLICT (id) DO UPDATE SET hostname = EXCLUDED.hostname, driver = EXCLUDED.driver, address = EXCLUDED.address,
+       capacity = EXCLUDED.capacity, version = EXCLUDED.version, last_heartbeat = now()`,
+    [nid, os.hostname(), driver.name, config.nodeAddress, { cpus: os.cpus().length, memoryMB: Math.round(os.totalmem() / 1048576) }, VERSION],
   );
-  console.log(`[agent] node ${nid} (${os.hostname()}) using the ${driver.name} driver`);
+  console.log(`[agent] node ${nid} (${os.hostname()}, ${config.nodeAddress}) using the ${driver.name} driver`);
 
   // Recover after a restart. Process instances from a previous agent are orphans: kill them and let the
   // reconciler start fresh ones. Docker containers are re-adopted.
-  const stale = await q("SELECT * FROM instances WHERE node_id = $1 AND status <> 'stopped'", [nid]);
+  // Pending instances keep waiting for their (requeued) start job. Lost ones were already replaced elsewhere
+  // while this node was down, so they are stopped rather than adopted.
+  const stale = await q("SELECT * FROM instances WHERE node_id = $1 AND status NOT IN ('stopped','pending')", [nid]);
   for (const inst of stale) {
-    if (driver.name === 'process') {
+    if (inst.status === 'lost') {
+      if (driver.name === 'process' && inst.ref) killTree(Number(inst.ref), true);
+      else if (driver.adopt && inst.ref) await (await driver.adopt(inst.ref, () => {}))?.stop(5000);
+      await q("UPDATE instances SET status = 'stopped', stopped_at = COALESCE(stopped_at, now()) WHERE id = $1", [inst.id]);
+    } else if (driver.name === 'process') {
       if (inst.ref) killTree(Number(inst.ref), true);
       await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE id = $1", [inst.id]);
     } else if (driver.adopt && inst.ref) {
@@ -122,23 +145,36 @@ async function main() {
   await q("UPDATE runs SET status = 'failed', finished_at = now() WHERE id IN (SELECT payload->>'runId' FROM jobs WHERE kind = 'run' AND status = 'running' AND locked_by = $1)", [nid]);
   await q("UPDATE jobs SET status = CASE WHEN attempts < max_attempts AND kind NOT IN ('deploy','run') THEN 'queued' ELSE 'failed' END, locked_by = NULL, error = 'agent restarted' WHERE status = 'running' AND locked_by = $1", [nid]);
   await recoverDatabases(ctx);
+  // Process instances do not survive an agent restart: let the cluster bring their services back to size.
+  for (const r of await q("SELECT DISTINCT service_id FROM instances WHERE node_id = $1 AND stopped_at > now() - interval '1 minute'", [nid])) {
+    await enqueue('scale', { serviceId: r.service_id }, { concurrencyKey: `svc:${r.service_id}` });
+  }
 
-  // Heartbeat + metrics.
-  setInterval(() => q('UPDATE nodes SET last_heartbeat = now() WHERE id = $1', [nid]).catch(() => {}), 10_000);
+  // Heartbeat (also reads back whether an operator is draining this node) + metrics + private networking.
+  let draining = false;
+  const beat = async () => {
+    const row = await one('UPDATE nodes SET last_heartbeat = now() WHERE id = $1 RETURNING draining', [nid]);
+    if (row && row.draining !== draining) console.log(`[agent] node ${row.draining ? 'draining: no new work will be placed here' : 'active'}`);
+    draining = Boolean(row?.draining);
+  };
+  await beat();
+  setInterval(() => beat().catch(() => {}), 10_000);
+  setInterval(() => instances.syncLbs().catch((e) => console.error('[agent] lb sync', e.message)), 3_000);
   setInterval(() => instances.sample().catch((e) => console.error('[agent] sample', e.message)), 15_000);
   setInterval(() => monitorDatabases(ctx).catch(() => {}), 5_000);
 
-  // Job loop.
-  let running = 0;
+  // Job loop: two lanes, each with its own concurrency.
+  const running = { work: 0, node: 0 };
   let stopping = false;
-  const loop = async () => {
-    while (!stopping && running < MAX_CONCURRENT) {
-      const job = await claim(nid).catch((err) => {
+  const loop = async (lane: 'work' | 'node') => {
+    const max = lane === 'node' ? NODE_LANE_CONCURRENCY : MAX_CONCURRENT;
+    while (!stopping && running[lane] < max) {
+      const job = await claim(nid, lane === 'node', draining).catch((err) => {
         console.error('[agent] claim failed', err.message);
         return null;
       });
       if (!job) break;
-      running++;
+      running[lane]++;
       const handler = HANDLERS[job.kind];
       (async () => {
         const started = Date.now();
@@ -155,20 +191,27 @@ async function main() {
             [job.id, retry ? 'queued' : 'failed', (err as Error).message.slice(0, 2000), 30 * job.attempts],
           );
         } finally {
-          running--;
+          running[lane]--;
           if (Date.now() - started > 1000) console.log(`[agent] ${job.kind} #${job.id} finished in ${((Date.now() - started) / 1000).toFixed(1)}s`);
-          void loop();
+          void loop(lane);
         }
       })();
     }
   };
-  setInterval(() => void loop(), 1000);
-  void loop();
+  const tick = () => { void loop('node'); void loop('work'); };
+  setInterval(tick, 1000);
+  tick();
 
   const shutdown = async () => {
     stopping = true;
     console.log('[agent] shutting down: stopping local instances');
+    const affected = new Set([...instances.entries.values()].map((e) => e.serviceId));
     await Promise.all([...instances.entries.values()].map((e) => (driver.name === 'process' ? instances.stop(e, 5000) : Promise.resolve())));
+    // Other nodes take over the instances this node just stopped.
+    if (driver.name === 'process' && (await liveNodes().catch(() => [])).length > 1) {
+      await q('UPDATE nodes SET last_heartbeat = now() - interval \'1 hour\' WHERE id = $1', [nid]).catch(() => {});
+      for (const sid of affected) await enqueue('scale', { serviceId: sid }, { concurrencyKey: `svc:${sid}` }).catch(() => {});
+    }
     await flushLogs();
     await pool.end().catch(() => {});
     process.exit(0);

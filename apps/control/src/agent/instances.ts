@@ -1,7 +1,7 @@
 // Instance lifecycle on this node: start, health-check, supervise (restart with backoff), drain, sample usage.
+// Instances are placed by the cluster (cluster.ts); this node starts the ones assigned to it.
 import net from 'node:net';
 import { config, publicUrlFor } from '@nav/shared/config';
-import { id } from '@nav/shared/ids';
 import { SERVICE_PLANS } from '@nav/shared';
 import { notify, one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
@@ -25,7 +25,7 @@ const DRAIN_GRACE_MS = 30_000;
 
 export class InstanceManager {
   readonly entries = new Map<string, Entry>();
-  private lbs = new Map<string, { server: net.Server; port: number; rr: number }>();
+  private lbs = new Map<string, { server: net.Server; port: number; rr: number; targets: { host: string; port: number }[] }>();
   private driver: Driver;
   private nodeId: string;
 
@@ -60,12 +60,16 @@ export class InstanceManager {
     };
   }
 
-  async start(svc: Row, deploy: Row, artifact: Artifact): Promise<Entry> {
-    const instanceId = id('ins');
-    await q('INSERT INTO instances (id, service_id, deploy_id, node_id, driver, status) VALUES ($1,$2,$3,$4,$5,$6)', [instanceId, svc.id, deploy.id, this.nodeId, this.driver.name, 'starting']);
+  /** Starts an instance the cluster assigned to this node (its row already exists). */
+  async startAssigned(instanceId: string, svc: Row, deploy: Row, artifact: Artifact): Promise<Entry> {
     const entry: Entry = { instanceId, serviceId: svc.id, deployId: deploy.id, workspaceId: svc.workspace_id, handle: null, stopping: false, restarts: 0 };
     this.entries.set(instanceId, entry);
-    await this.launch(entry, svc, deploy, artifact);
+    try {
+      await this.launch(entry, svc, deploy, artifact);
+    } catch (err) {
+      this.entries.delete(instanceId);
+      throw err;
+    }
     await changed(svc.workspace_id, 'instance', instanceId, svc.id);
     return entry;
   }
@@ -90,7 +94,8 @@ export class InstanceManager {
       onLog: (line, level) => shipLog(target, line, level ?? 'info'),
     });
     entry.handle = handle;
-    await q("UPDATE instances SET ref = $2, host = $3, port = $4, status = 'starting' WHERE id = $1", [entry.instanceId, handle.ref, handle.host, handle.port]);
+    // A stop that raced the start keeps its status; the starter notices and stops the process.
+    await q("UPDATE instances SET ref = $2, host = $3, port = $4, status = CASE WHEN status IN ('stopped','lost','draining') THEN status ELSE 'starting' END WHERE id = $1", [entry.instanceId, handle.ref, handle.host, handle.port]);
     handle.exited.then((code) => this.onExit(entry, code, svc.id));
   }
 
@@ -147,6 +152,7 @@ export class InstanceManager {
   async markHealthy(entry: Entry): Promise<void> {
     await q("UPDATE instances SET status = 'healthy' WHERE id = $1", [entry.instanceId]);
     await notify('nav_routes');
+    void this.syncLbs().catch(() => {});
     await changed(entry.workspaceId, 'instance', entry.instanceId, entry.serviceId);
   }
 
@@ -167,6 +173,21 @@ export class InstanceManager {
   }
 
   // --- Private networking (process driver): stable 127.0.0.1:<internal_port> TCP load balancer ---------
+  // Every node runs a balancer for every service, so a service reaches another one on the same local port
+  // wherever its instances were placed. Targets are the cluster's healthy instances.
+
+  /** Opens balancers for new services, refreshes targets, and closes balancers of deleted services. */
+  async syncLbs(): Promise<void> {
+    if (this.driver.name !== 'process') return;
+    const svcs = await q("SELECT id, slug, type, internal_port FROM services WHERE type IN ('web','private') AND internal_port IS NOT NULL AND status <> 'deleting'");
+    const ups = await q("SELECT service_id, host, port FROM instances WHERE status = 'healthy' AND port IS NOT NULL");
+    for (const s of svcs) await this.ensureLb(s);
+    const keep = new Set(svcs.map((s) => s.id));
+    for (const [sid, lb] of this.lbs) {
+      if (!keep.has(sid)) { this.closeLb(sid); continue; }
+      lb.targets = ups.filter((u) => u.service_id === sid).map((u) => ({ host: u.host, port: u.port }));
+    }
+  }
 
   async ensureLb(svc: Row): Promise<void> {
     if (this.driver.name !== 'process' || !['web', 'private'].includes(svc.type) || this.lbs.has(svc.id)) return;
@@ -176,12 +197,11 @@ export class InstanceManager {
       const row = await one('UPDATE services SET internal_port = COALESCE(internal_port, $2) WHERE id = $1 RETURNING internal_port', [svc.id, candidate]);
       port = row!.internal_port;
     }
-    const lb = { server: net.createServer(), port, rr: 0 };
+    const lb = { server: net.createServer(), port, rr: 0, targets: [] as { host: string; port: number }[] };
     lb.server.on('connection', (client) => {
-      const targets = this.forService(svc.id).filter((e) => e.handle?.port);
-      if (!targets.length) return client.destroy();
-      const t = targets[lb.rr++ % targets.length];
-      const upstream = net.connect({ host: t.handle!.host, port: t.handle!.port! });
+      if (!lb.targets.length) return client.destroy();
+      const t = lb.targets[lb.rr++ % lb.targets.length];
+      const upstream = net.connect({ host: t.host, port: t.port });
       client.pipe(upstream).pipe(client);
       const close = () => { client.destroy(); upstream.destroy(); };
       client.on('error', close);

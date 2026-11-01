@@ -166,7 +166,7 @@ export interface Instance {
   serviceId: string;
   deployId: string;
   nodeId: string;
-  status: 'starting' | 'healthy' | 'unhealthy' | 'draining' | 'stopped' | 'crashed';
+  status: 'pending' | 'starting' | 'healthy' | 'unhealthy' | 'draining' | 'stopped' | 'crashed' | 'lost';
   restartCount: number;
   lastExitCode: number | null;
   startedAt: string;

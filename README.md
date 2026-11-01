@@ -58,3 +58,37 @@ and a full blueprint sync. Unit tests: `npm test -w @nav/edge`, `npm test -w @na
   `NAV_ACME_EMAIL` and `NAV_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory`.
 - GitHub: create a GitHub App (webhook → `/api/v1/webhooks/github`) and OAuth app; set `NAV_GITHUB_*` (see `packages/shared/src/config.ts`).
 - Build the dashboard (`npm run build -w @nav/web`); control serves it from `apps/web/dist`.
+
+## Running on several servers
+
+One control plane (API + scheduler, plus the edge) and any number of agent nodes, all pointed at the same platform
+Postgres. Every agent is a node: it registers itself, heartbeats every 10 s, and runs the instances the cluster
+places on it.
+
+- **Placement.** Deploys, scaling and restarts choose a node for each instance: it must be online, not draining, run
+  a driver that can execute the build, and be able to obtain the build. Replicas of a service are spread across nodes,
+  then the node with the most free memory (capacity minus the plans already placed there) wins. A service with a disk
+  is pinned to the node that holds the disk.
+- **Artifact store.** Once there is more than one node, each build is uploaded to the control plane
+  (`/internal/v1/artifacts`, authenticated with a token derived from `NAV_MASTER_KEY`) and verified by SHA-256 when
+  another node or the edge fetches it. Docker images travel as `docker save` archives; registry images are pulled by
+  each node. `NAV_ARTIFACT_UPLOAD=always|never` overrides the automatic choice.
+- **Node failure.** A node silent for 60 s has its instances marked lost; the scheduler places replacements on the
+  remaining nodes and the edge stops routing to it. A node that comes back stops the instances it lost.
+- **Draining.** `UPDATE nodes SET draining = true WHERE id = '…'` stops new work landing on a node; scale or restart
+  its services to move them off.
+
+Per node, set the same `NAV_DATABASE_URL` and `NAV_MASTER_KEY`, plus:
+
+| Variable | Purpose |
+| --- | --- |
+| `NAV_CONTROL_URL` | Control plane's internal API, e.g. `http://10.0.0.2:4000` (keep it on the private network) |
+| `NAV_NODE_ADDRESS` | This node's private IP; the edge and other nodes reach its instances there |
+| `NAV_NODE_BIND_IP` | Interface instance ports are published on (defaults to `NAV_NODE_ADDRESS`; never a public IP) |
+
+Locally, `npm run dev -- --agents=2` starts two nodes with separate data directories, and
+`NAV_E2E_NODES=2 node scripts/e2e.ts` also checks that replicas land on different nodes.
+
+Current limits: with the Docker driver, private networking (`<service>:<port>` between services) does not span nodes
+yet (the process driver runs a balancer for every service on every node, so it does). Postgres databases live on the
+node that created them and are not replicated.

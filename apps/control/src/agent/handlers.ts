@@ -8,8 +8,9 @@ import { notify, one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
 import { authedUrl, git } from '../lib/git.ts';
 import { setCommitStatus } from '../lib/github.ts';
-import { issueCertificate, verifyDomain } from '../lib/domains.ts';
 import { applyBlueprint, fetchBlueprintFile, parseBlueprint } from '../lib/blueprints.ts';
+import { localize, publish, removeLocal, retire } from './artifacts.ts';
+import { activeInstances, describePlacement, place, startInstances, stopInstances, waitInstances } from './cluster.ts';
 import { detect } from './detect.ts';
 import { HEALTH_TIMEOUT_MS, type Entry, type InstanceManager } from './instances.ts';
 import type { Artifact, Driver } from './runtime/types.ts';
@@ -56,18 +57,21 @@ async function checkout(svc: Row, deploy: Row, dir: string, log: (l: string) => 
   return (await git(['log', '-1', '--format=%H%x00%s%x00%an'], { cwd: dir })).stdout.trim();
 }
 
-async function cleanupArtifacts(ctx: Ctx, serviceId: string): Promise<void> {
+async function cleanupArtifacts(serviceId: string): Promise<void> {
   const old = await q(
     `SELECT id, artifact FROM deploys WHERE service_id = $1 AND artifact IS NOT NULL AND status IN ('deactivated','build_failed','update_failed','pre_deploy_failed','canceled')
      ORDER BY created_at DESC OFFSET $2`,
     [serviceId, KEEP_ARTIFACTS],
   );
+  const gone: Artifact[] = [];
   for (const d of old) {
     const shared = await one('SELECT 1 FROM deploys WHERE artifact = $1 AND id <> $2 AND status = \'live\'', [d.artifact, d.id]);
     if (shared) continue;
-    await ctx.driver.removeArtifact(d.artifact);
+    gone.push(d.artifact);
     await q('UPDATE deploys SET artifact = NULL WHERE id = $1', [d.id]);
   }
+  // Pruned builds are deleted from the store and from every node.
+  await retire(gone);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -92,7 +96,7 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
   const ghStatus = (state: 'pending' | 'success' | 'failure', desc: string) =>
     deploy!.commit_sha && svc.repo_url ? setCommitStatus(svc.installation_id ? Number(svc.installation_id) : null, svc.repo_url, deploy!.commit_sha, state, desc, statusUrl).catch(() => {}) : undefined;
 
-  const newEntries: Entry[] = [];
+  const newIds: string[] = [];
   try {
     await setDeploy(deploy.id, { status: 'build_in_progress', started_at: new Date() }, ws, svc.id);
     await ghStatus('pending', 'Deploying on NAV');
@@ -133,6 +137,13 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
       }
       await q('UPDATE deploys SET config = config || $2 WHERE id = $1', [deploy.id, { runtime: detected.runtime, buildCommand, startCommand }]);
     }
+    if (!deploy.artifact) {
+      try {
+        artifact = await publish(ctx, artifact!, deploy.id, log);
+      } catch (err) {
+        throw new DeployError('build_failed', `could not upload the build: ${(err as Error).message}`);
+      }
+    }
     await setDeploy(deploy.id, { artifact: JSON.stringify(artifact), build_finished_at: new Date() }, ws, svc.id);
     if (canceled()) throw new DeployError('canceled', 'canceled');
 
@@ -149,24 +160,24 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
     // ---- Update -------------------------------------------------------------------------------------
     await setDeploy(deploy.id, { status: 'update_in_progress' }, ws, svc.id);
     const fresh = (await one('SELECT * FROM services WHERE id = $1', [svc.id]))!;
-    const old = ctx.instances.forService(svc.id);
+    const old = await activeInstances(svc.id);
     if (['web', 'private', 'worker'].includes(svc.type) && !fresh.suspended) {
-      await ctx.instances.ensureLb(fresh);
       const count = Math.max(1, fresh.instance_count);
+      const nodes = await place(fresh, artifact!, count).catch((err) => { throw new DeployError('update_failed', err.message); });
       // A persistent disk can only be attached to one instance: stop the old one first (brief downtime).
-      if (fresh.disk) {
+      if (fresh.disk && old.length) {
         deployLog('==> Service has a disk: stopping the previous instance before starting the new one');
-        for (const e of old) await ctx.instances.stop(e);
+        await stopInstances(old.map((r) => r.id), 30_000, true);
       }
-      deployLog(`==> Starting ${count} instance${count > 1 ? 's' : ''}`);
-      for (let i = 0; i < count; i++) newEntries.push(await ctx.instances.start(fresh, deploy, artifact!));
-      const results = await Promise.all(newEntries.map((e) => ctx.instances.waitHealthy(e, fresh, HEALTH_TIMEOUT_MS, deployLog)));
-      if (canceled()) throw new DeployError('canceled', 'canceled');
-      if (results.some((ok) => !ok)) {
-        const what = svc.type === 'web' ? (svc.health_check_path ? `health check ${svc.health_check_path} did not return a successful response` : 'no open port detected — make sure your app listens on the PORT environment variable (0.0.0.0)') : svc.type === 'private' ? 'no open port detected on PORT' : 'process exited';
+      deployLog(`==> Starting ${count} instance${count > 1 ? 's' : ''}${await describePlacement(nodes)}`);
+      newIds.push(...(await startInstances(fresh, deploy, nodes, deploy.id)));
+      const result = await waitInstances(newIds, HEALTH_TIMEOUT_MS + 10 * 60_000, abort.signal);
+      if (canceled() || result === 'canceled') throw new DeployError('canceled', 'canceled');
+      if (result !== 'healthy') {
+        const lost = await one("SELECT 1 FROM instances WHERE id = ANY($1) AND status = 'lost'", [newIds]);
+        const what = lost ? 'the node running it went offline' : svc.type === 'web' ? (svc.health_check_path ? `health check ${svc.health_check_path} did not return a successful response` : 'no open port detected — make sure your app listens on the PORT environment variable (0.0.0.0)') : svc.type === 'private' ? 'no open port detected on PORT' : 'process exited';
         throw new DeployError('update_failed', `instance failed to become healthy: ${what}`);
       }
-      for (const e of newEntries) await ctx.instances.markHealthy(e);
       // Let the edge pick up the new upstreams (LISTEN nav_routes, ~100ms debounce) before reporting live.
       await sleep(750);
       deployLog(`==> Your service is live 🎉${['web'].includes(svc.type) ? `  ${publicUrlFor(svc.slug)}` : ''}`);
@@ -182,11 +193,11 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
     await recordEvent({ workspaceId: ws, serviceId: svc.id, kind: 'deploy_live', data: { deployId: deploy.id, commitSha: deploy.commit_sha, trigger: deploy.trigger } });
     await ghStatus('success', 'Deployed on NAV');
     // Drain the previous deploy's instances (zero-downtime: new ones already serve traffic).
-    for (const e of old) if (!fresh.disk) void ctx.instances.stop(e);
-    await cleanupArtifacts(ctx, svc.id);
+    if (!fresh.disk) await stopInstances(old.map((r) => r.id));
+    await cleanupArtifacts(svc.id);
   } catch (err) {
     const e = err instanceof DeployError ? err : new DeployError('update_failed', (err as Error).message);
-    for (const n of newEntries) await ctx.instances.stop(n, 2000).catch(() => {});
+    await stopInstances(newIds, 2000).catch(() => {});
     if (e.status === 'canceled') {
       await setDeploy(deploy.id, { status: 'canceled', finished_at: new Date() }, ws, svc.id);
       deployLog('==> Deploy canceled', 'warn');
@@ -208,6 +219,7 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
 export async function runOneOff(ctx: Ctx, svc: Row, deploy: Row, artifact: Artifact, command: string | null, log: (l: string, level?: string) => void, signal: AbortSignal, timeoutMs: number): Promise<number> {
   const { env, files } = await ctx.instances.runtimeEnv(svc, deploy, null);
   const plan = SERVICE_PLANS.find((p) => p.id === svc.plan) ?? SERVICE_PLANS[1];
+  artifact = await localize(ctx, artifact, (l) => log(l));
   const handle = await ctx.driver.start({
     instanceId: `job-${Date.now().toString(36)}`, serviceId: svc.id, workspaceId: svc.workspace_id, slug: svc.slug, artifact,
     command, env, files, containerPort: null, plan, disk: svc.disk, oneOff: true, onLog: (l, lvl) => log(l, lvl),
@@ -222,33 +234,37 @@ export async function runOneOff(ctx: Ctx, svc: Row, deploy: Row, artifact: Artif
 }
 
 // ---------------------------------------------------------------------------------------------------
-export async function handleScale(ctx: Ctx, payload: { serviceId: string }): Promise<void> {
+export async function handleScale(_ctx: Ctx, payload: { serviceId: string }): Promise<void> {
   const svc = await one('SELECT * FROM services WHERE id = $1', [payload.serviceId]);
   if (!svc || !['web', 'private', 'worker'].includes(svc.type)) return;
-  const current = ctx.instances.forService(svc.id);
+  const current = await activeInstances(svc.id);
   if (svc.suspended || svc.status === 'deleting' || !svc.current_deploy_id) {
-    for (const e of current) await ctx.instances.stop(e, 10_000);
+    await stopInstances(current.map((r) => r.id), 10_000, true);
     return;
   }
   const deploy = await one('SELECT * FROM deploys WHERE id = $1', [svc.current_deploy_id]);
   if (!deploy?.artifact) return;
-  await ctx.instances.ensureLb(svc);
   // Stray instances from older deploys go away.
-  for (const e of current.filter((e) => e.deployId !== deploy.id)) await ctx.instances.stop(e);
-  const mine = ctx.instances.forService(svc.id);
+  await stopInstances(current.filter((r) => r.deploy_id !== deploy.id).map((r) => r.id));
+  const mine = current.filter((r) => r.deploy_id === deploy.id);
   const want = svc.instance_count;
   const log = (l: string) => shipLog({ serviceId: svc.id, stream: 'system' }, l);
   if (mine.length < want) {
     log(`==> Scaling up to ${want} instance${want > 1 ? 's' : ''}`);
-    const started = [];
-    for (let i = mine.length; i < want; i++) started.push(await ctx.instances.start(svc, deploy, deploy.artifact));
-    await Promise.all(started.map(async (e) => {
-      if (await ctx.instances.waitHealthy(e, svc, 5 * 60_000)) await ctx.instances.markHealthy(e);
-      else { log(`==> Instance ${e.instanceId} failed to become healthy`); await ctx.instances.stop(e, 2000); }
-    }));
+    let ids: string[];
+    try {
+      ids = await startInstances(svc, deploy, await place(svc, deploy.artifact, want - mine.length));
+    } catch (err) {
+      log(`==> ${(err as Error).message}`);
+      return;
+    }
+    if ((await waitInstances(ids, 10 * 60_000)) !== 'healthy') log('==> Some new instances failed to become healthy');
   } else if (mine.length > want) {
     log(`==> Scaling down to ${want} instance${want > 1 ? 's' : ''}`);
-    for (const e of mine.slice(want)) await ctx.instances.stop(e);
+    // Unhealthy instances go first, then the newest.
+    const rank = (r: Row) => (r.status === 'healthy' ? 1 : 0);
+    const victims = [...mine].sort((a, b) => rank(a) - rank(b) || +new Date(b.started_at) - +new Date(a.started_at)).slice(0, mine.length - want);
+    await stopInstances(victims.map((r) => r.id));
   }
   await q("UPDATE services SET status = 'live' WHERE id = $1 AND status IN ('deploying','suspended','failed') AND NOT suspended", [svc.id]);
   await changed(svc.workspace_id, 'service', svc.id, svc.id);
@@ -261,23 +277,27 @@ export async function handleRestart(ctx: Ctx, payload: { serviceId: string }): P
   if (!deploy?.artifact) return;
   const log = (l: string) => shipLog({ serviceId: svc.id, stream: 'system' }, l);
   log('==> Rolling restart');
-  for (const old of ctx.instances.forService(svc.id)) {
-    if (svc.disk) await ctx.instances.stop(old);
-    const fresh = await ctx.instances.start(svc, deploy, deploy.artifact);
-    if (await ctx.instances.waitHealthy(fresh, svc, 5 * 60_000)) {
-      await ctx.instances.markHealthy(fresh);
-      if (!svc.disk) await ctx.instances.stop(old);
+  for (const old of (await activeInstances(svc.id)).filter((r) => r.deploy_id === deploy.id)) {
+    if (svc.disk) await stopInstances([old.id], 30_000, true);
+    let ids: string[];
+    try {
+      ids = await startInstances(svc, deploy, await place(svc, deploy.artifact, 1));
+    } catch (err) {
+      log(`==> ${(err as Error).message}`);
+      break;
+    }
+    if ((await waitInstances(ids, 10 * 60_000)) === 'healthy') {
+      if (!svc.disk) await stopInstances([old.id]);
     } else {
       log('==> Replacement instance failed health checks; keeping the existing instance');
-      await ctx.instances.stop(fresh, 2000);
+      await stopInstances(ids, 2000);
     }
   }
   await handleScale(ctx, payload);
 }
 
-export async function handleStop(ctx: Ctx, payload: { serviceId: string }): Promise<void> {
-  for (const e of ctx.instances.forService(payload.serviceId)) await ctx.instances.stop(e, 10_000);
-  await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE service_id = $1 AND node_id = $2 AND status <> 'stopped'", [payload.serviceId, ctx.nodeId]);
+export async function handleStop(_ctx: Ctx, payload: { serviceId: string }): Promise<void> {
+  await stopInstances((await activeInstances(payload.serviceId)).map((r) => r.id), 10_000, true);
   await notify('nav_routes');
 }
 
@@ -286,9 +306,9 @@ export async function handleDeleteService(ctx: Ctx, payload: { serviceId: string
   if (!svc) return;
   await handleStop(ctx, payload);
   ctx.instances.closeLb(svc.id);
-  const deploys = await q('SELECT artifact FROM deploys WHERE service_id = $1 AND artifact IS NOT NULL', [svc.id]);
-  for (const d of deploys) await ctx.driver.removeArtifact(d.artifact);
-  await ctx.driver.removeServiceData?.(svc.id);
+  // Builds and disk data are removed on every node (and from the store) by node-targeted cleanup jobs.
+  const deploys = await q('SELECT DISTINCT artifact FROM deploys WHERE service_id = $1 AND artifact IS NOT NULL', [svc.id]);
+  await retire(deploys.map((d) => d.artifact), svc.id);
   await q("DELETE FROM env_vars WHERE owner_type = 'service' AND owner_id = $1", [svc.id]);
   await q("DELETE FROM secret_files WHERE owner_type = 'service' AND owner_id = $1", [svc.id]);
   await q('DELETE FROM metrics WHERE service_id = $1', [svc.id]);
@@ -298,6 +318,49 @@ export async function handleDeleteService(ctx: Ctx, payload: { serviceId: string
   await q('DELETE FROM services WHERE id = $1', [svc.id]);
   await notify('nav_routes');
   await changed(svc.workspace_id, 'service', svc.id, svc.id);
+}
+
+// --- Node-targeted jobs: run only by the agent of the node they name ---------------------------------
+
+/** Starts an instance the cluster placed on this node and reports whether it became healthy. */
+export async function handleInstanceStart(ctx: Ctx, payload: { instanceId: string; deployId: string | null }): Promise<void> {
+  const row = await one("UPDATE instances SET status = 'starting', started_at = now() WHERE id = $1 AND node_id = $2 AND status = 'pending' RETURNING *", [payload.instanceId, ctx.nodeId]);
+  if (!row) return;
+  const log = (l: string, level = 'info') => shipLog(payload.deployId ? { serviceId: row.service_id, deployId: payload.deployId, stream: 'deploy' } : { serviceId: row.service_id, stream: 'system' }, l, level);
+  const svc = await one('SELECT * FROM services WHERE id = $1', [row.service_id]);
+  const deploy = await one('SELECT * FROM deploys WHERE id = $1', [row.deploy_id]);
+  let entry: Entry;
+  try {
+    if (!svc || !deploy?.artifact || svc.status === 'deleting') throw new Error('the service or its build no longer exists');
+    const artifact = await localize(ctx, deploy.artifact, log);
+    await ctx.instances.ensureLb(svc);
+    entry = await ctx.instances.startAssigned(row.id, svc, deploy, artifact);
+  } catch (err) {
+    log(`==> Instance ${row.id} could not start: ${(err as Error).message}`, 'error');
+    await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE id = $1", [row.id]);
+    if (svc) await changed(svc.workspace_id, 'instance', row.id, svc.id);
+    return;
+  }
+  const ok = await ctx.instances.waitHealthy(entry, svc, HEALTH_TIMEOUT_MS, log);
+  if (entry.stopping) return;
+  // It may have been cancelled (deploy canceled, scaled down) while it was starting.
+  const still = (await one('SELECT status FROM instances WHERE id = $1', [row.id]))?.status === 'starting';
+  if (ok && still) return ctx.instances.markHealthy(entry);
+  if (!ok) log(`==> Instance ${row.id} failed to become healthy`, 'error');
+  await ctx.instances.stop(entry, 2000);
+}
+
+export async function handleInstanceStop(ctx: Ctx, payload: { instanceId: string; graceMs?: number }): Promise<void> {
+  const entry = ctx.instances.entries.get(payload.instanceId);
+  if (entry) return ctx.instances.stop(entry, payload.graceMs ?? 30_000);
+  await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE id = $1 AND node_id = $2 AND status NOT IN ('stopped','lost')", [payload.instanceId, ctx.nodeId]);
+  await notify('nav_routes');
+}
+
+/** Removes this node's copies of retired builds and, for a deleted service, its disk data. */
+export async function handleNodeCleanup(ctx: Ctx, payload: { artifacts?: Artifact[]; serviceId?: string | null }): Promise<void> {
+  for (const a of payload.artifacts ?? []) if (a) await removeLocal(ctx, a);
+  if (payload.serviceId) await ctx.driver.removeServiceData?.(payload.serviceId);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -339,14 +402,6 @@ export async function handleRun(ctx: Ctx, payload: { runId: string; serviceId: s
 }
 
 // ---------------------------------------------------------------------------------------------------
-export async function handleVerifyDomain(_ctx: Ctx, payload: { domainId: string }): Promise<void> {
-  await verifyDomain(payload.domainId);
-}
-
-export async function handleIssueCert(_ctx: Ctx, payload: { domainId: string }): Promise<void> {
-  await issueCertificate(payload.domainId, (m) => console.log(`[acme] ${m}`));
-}
-
 export async function handleBlueprintSync(_ctx: Ctx, payload: { blueprintId: string }): Promise<void> {
   const bp = await one('SELECT * FROM blueprints WHERE id = $1', [payload.blueprintId]);
   if (!bp) return;

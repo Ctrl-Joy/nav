@@ -109,7 +109,7 @@ export function processDriver(): Driver {
       exited.then(() => rm(instDir, { recursive: true, force: true }).catch(() => {}));
       return {
         ref: String(child.pid),
-        host: '127.0.0.1',
+        host: config.nodeAddress,
         port,
         exited,
         async stop(graceMs) {

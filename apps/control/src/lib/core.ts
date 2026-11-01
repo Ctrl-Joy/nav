@@ -44,12 +44,14 @@ export interface EnqueueOptions {
   concurrencyKey?: string;
   runAt?: Date;
   maxAttempts?: number;
+  /** Only this node's agent may claim the job (instance lifecycle, local cleanup). */
+  nodeId?: string;
   client?: Client;
 }
 
 export async function enqueue(kind: string, payload: Record<string, unknown>, opts: EnqueueOptions = {}): Promise<number> {
-  const sql = 'INSERT INTO jobs (kind, payload, concurrency_key, run_at, max_attempts) VALUES ($1,$2,$3,$4,$5) RETURNING id';
-  const params = [kind, payload, opts.concurrencyKey ?? null, opts.runAt ?? new Date(), opts.maxAttempts ?? 1];
+  const sql = 'INSERT INTO jobs (kind, payload, concurrency_key, run_at, max_attempts, node_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id';
+  const params = [kind, payload, opts.concurrencyKey ?? null, opts.runAt ?? new Date(), opts.maxAttempts ?? 1, opts.nodeId ?? null];
   const row = opts.client ? (await opts.client.query(sql, params)).rows[0] : await one(sql, params);
   return row!.id;
 }

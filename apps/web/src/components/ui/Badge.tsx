@@ -74,6 +74,7 @@ const STATUS: Record<string, StatusDef> = {
   draining: { tone: 'info', label: 'Draining', pulse: true },
   stopped: { tone: 'neutral', label: 'Stopped' },
   crashed: { tone: 'danger', label: 'Crashed' },
+  lost: { tone: 'neutral', label: 'Node lost' },
   // run / backup
   pending: { tone: 'neutral', label: 'Pending', pulse: true },
   running: { tone: 'info', label: 'Running', pulse: true },

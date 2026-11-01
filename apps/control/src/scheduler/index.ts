@@ -4,7 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { config } from '@nav/shared/config';
 import { id } from '@nav/shared/ids';
 import { SERVICE_PLANS } from '@nav/shared';
-import { pool, q } from '../db/pool.ts';
+import { notify, pool, q } from '../db/pool.ts';
 import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
 
@@ -87,10 +87,20 @@ async function autoscaleTick(): Promise<void> {
 
 /** Reconciler: services whose running instance count drifted from desired get a scale job. */
 async function reconcileTick(): Promise<void> {
+  // Instances on nodes that stopped heartbeating are lost; the drift check below replaces them elsewhere.
+  const lost = await q(
+    `UPDATE instances SET status = 'lost', stopped_at = now()
+     WHERE status NOT IN ('stopped','lost') AND node_id IN (SELECT id FROM nodes WHERE last_heartbeat < now() - interval '60 seconds')
+     RETURNING id, node_id`,
+  );
+  if (lost.length) {
+    console.log(`[scheduler] ${lost.length} instance(s) lost on unresponsive node(s) ${[...new Set(lost.map((r) => r.node_id))].join(', ')}`);
+    await notify('nav_routes');
+  }
   const drift = await q(
     `SELECT s.id FROM services s
      WHERE s.type IN ('web','private','worker') AND NOT s.suspended AND s.status IN ('live','failed') AND s.current_deploy_id IS NOT NULL
-       AND (SELECT count(*) FROM instances i WHERE i.service_id = s.id AND i.deploy_id = s.current_deploy_id AND i.status IN ('starting','healthy','unhealthy')) <> s.instance_count
+       AND (SELECT count(*) FROM instances i WHERE i.service_id = s.id AND i.deploy_id = s.current_deploy_id AND i.status IN ('pending','starting','healthy','unhealthy','crashed')) <> s.instance_count
        AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.concurrency_key = 'svc:' || s.id AND j.status IN ('queued','running'))`,
   );
   for (const s of drift) await enqueue('scale', { serviceId: s.id }, { concurrencyKey: `svc:${s.id}` });
@@ -100,6 +110,10 @@ async function reconcileTick(): Promise<void> {
     `UPDATE jobs SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END, locked_by = NULL,
        error = COALESCE(error, 'agent stopped responding') , run_at = now()
      WHERE status = 'running' AND locked_by IN (SELECT id FROM nodes WHERE last_heartbeat < now() - interval '60 seconds')`,
+  );
+  await q(
+    `UPDATE jobs SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END, locked_by = NULL, run_at = now()
+     WHERE status = 'running' AND locked_by LIKE 'control:%' AND locked_at < now() - interval '10 minutes'`,
   );
   // Deploys stuck because their job vanished (e.g. agent crash) are failed so the service is not wedged.
   await q(
@@ -117,7 +131,8 @@ async function housekeepingTick(): Promise<void> {
   await q("DELETE FROM sessions WHERE expires_at < now()");
   await q("DELETE FROM jobs WHERE status IN ('done','failed','canceled') AND finished_at < now() - interval '3 days'");
   await q("DELETE FROM acme_challenges WHERE created_at < now() - interval '1 day'");
-  await q("DELETE FROM instances WHERE status = 'stopped' AND stopped_at < now() - interval '1 day'");
+  await q("DELETE FROM instances WHERE status IN ('stopped','lost') AND stopped_at < now() - interval '1 day'");
+  await q("DELETE FROM nodes WHERE last_heartbeat < now() - interval '7 days' AND NOT EXISTS (SELECT 1 FROM databases d WHERE d.node_id = nodes.id)");
   // Expire idle previews.
   const expired = await q(
     `SELECT c.* FROM services c JOIN services p ON p.id = c.parent_service_id

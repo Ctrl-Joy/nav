@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { fetchDir, relocate, type StoredArtifact } from '@nav/shared/artifacts';
+import { config } from '@nav/shared/config';
 import { matchPath, matchRules } from './match.ts';
 import { sendPage } from './pages.ts';
 import type { Route } from './routes.ts';
@@ -173,8 +175,24 @@ function statFile(p: string): fs.Stats | null {
 
 interface Resolved { file: string; stat: fs.Stats }
 
+/** True when `file`, with symlinks resolved, is still inside `root` (a site cannot link to host files). */
+function inside(root: string, file: string): boolean {
+  try {
+    const r = fs.realpathSync(root);
+    const rel = path.relative(r, fs.realpathSync(file));
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  } catch {
+    return false;
+  }
+}
+
 /** Look up a file for a decoded path: exact file, dir/index.html, or `path.html`. */
 export function lookupFile(root: string, urlPath: string): Resolved | { redirect: string } | null {
+  const found = lookupUnchecked(root, urlPath);
+  return found && 'file' in found && !inside(root, found.file) ? null : found;
+}
+
+function lookupUnchecked(root: string, urlPath: string): Resolved | { redirect: string } | null {
   const abs = resolveSafe(root, urlPath);
   if (!abs) return null;
   const st = statFile(abs);
@@ -200,8 +218,20 @@ function encodePathForLocation(p: string): string {
   return p.split('/').map((s) => encodeURIComponent(s)).join('/');
 }
 
+/** Static builds made on another node are fetched once from the artifact store into the edge's cache. */
+const edgeCache = path.join(config.dataDir, 'edge-artifacts');
+
 export function serveStatic(req: IncomingMessage, res: ServerResponse, route: Route, ctx: StaticContext): void {
   const root = route.artifact?.kind === 'dir' && typeof route.artifact.path === 'string' ? route.artifact.path : null;
+  const stored = route.artifact?.store as StoredArtifact | undefined;
+  if (root && stored && !fs.existsSync(root)) {
+    const art = route.artifact as unknown as { root: string; path: string };
+    fetchDir(stored, edgeCache).then(
+      (dir) => { route.artifact = { ...route.artifact!, ...relocate(art, dir) }; serveStatic(req, res, route, ctx); },
+      (err) => { console.error(`[edge] could not fetch static build ${stored.key}: ${(err as Error).message}`); sendPage(req, res, 'no_upstream', {}, ctx.requestId); },
+    );
+    return;
+  }
   const rawUrl = req.url ?? '/';
   const qIdx = rawUrl.indexOf('?');
   const rawPath = qIdx >= 0 ? rawUrl.slice(0, qIdx) : rawUrl;
