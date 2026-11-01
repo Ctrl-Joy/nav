@@ -6,6 +6,8 @@ export interface MeUser extends User {
   mfaEnabled?: boolean;
   recoveryCodesLeft?: number;
   emailNotifications?: boolean;
+  /** Administers this NAV instance (NAV_ADMIN_EMAILS, or the first account): may manage sign-in providers. */
+  isPlatformAdmin?: boolean;
 }
 
 /** Workspace list item, including its login policy. */

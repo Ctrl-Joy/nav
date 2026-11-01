@@ -9,7 +9,7 @@ export function oauthErrorMessage(code: string | null, provider: string | null):
   if (!code) return null;
   const p = PROVIDER_NAMES[provider as AuthProvider] ?? 'that provider';
   switch (code) {
-    case 'provider_disabled': return `${p} sign-in isn't set up on this NAV server yet.`;
+    case 'provider_disabled': return `${p} sign-in isn't set up on this NAV server yet. The server's administrator can turn it on.`;
     case 'cancelled': return `${p} sign-in was cancelled.`;
     case 'bad_state': return 'Your sign-in attempt expired. Please try again.';
     case 'unverified_email': return `Your ${p} account doesn't have a verified email address, so NAV can't use it to sign in.`;

@@ -58,6 +58,8 @@ export const config = {
       clientSecret: process.env.NAV_GOOGLE_CLIENT_SECRET ?? '',
     },
   },
+  /** NAV instance administrators: may manage sign-in providers. Unset: the first user ever created. */
+  adminEmails: (process.env.NAV_ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean),
   /** OpenID Connect single sign-on for the listed email domains. */
   sso: {
     issuer: (process.env.NAV_SSO_ISSUER ?? '').replace(/\/+$/, ''),

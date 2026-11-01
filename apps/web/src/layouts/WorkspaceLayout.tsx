@@ -26,6 +26,7 @@ import {
   Search,
   Settings,
   ShieldAlert,
+  ShieldCheck,
   UserRound,
   X,
   type LucideIcon,
@@ -99,6 +100,7 @@ const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   services: { label: 'Services', icon: Globe },
   new: { label: 'New service', icon: Plus },
   'get-started': { label: 'Get started', icon: Rocket },
+  admin: { label: 'Sign-in providers', icon: ShieldCheck },
 };
 
 const COLLAPSE_KEY = 'nav.sidebar.collapsed';
@@ -244,6 +246,7 @@ function Sidebar({
   onNavigate?: () => void;
 }) {
   const bottomLink = cn(rowClass(collapsed), 'h-[31px] text-[13px] text-fg-muted hover:bg-surface-2 hover:text-fg');
+  const isPlatformAdmin = !!useMe().data?.user.isPlatformAdmin;
   return (
     <div className="flex h-full flex-col">
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto py-3">
@@ -269,6 +272,21 @@ function Sidebar({
             </ul>
           </div>
         ))}
+        {isPlatformAdmin && (
+          <div className={cn(collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5')}>
+            {!collapsed && <div className="nv-label px-3 pb-2">Instance</div>}
+            <NavLink
+              to={`/w/${ctx.ws}/admin/sign-in`}
+              onClick={onNavigate}
+              title={collapsed ? 'Sign-in providers' : undefined}
+              aria-label={collapsed ? 'Sign-in providers' : undefined}
+              className={({ isActive }) => cn(rowClass(collapsed), isActive ? 'nv-active' : 'text-fg hover:bg-surface-2')}
+            >
+              <ShieldCheck className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+              {!collapsed && <span className="truncate">Sign-in providers</span>}
+            </NavLink>
+          </div>
+        )}
       </nav>
       <div className="border-t border-border py-2">
         <Link to="/docs" onClick={onNavigate} className={bottomLink} title={collapsed ? 'Docs' : undefined} aria-label={collapsed ? 'Docs' : undefined}>

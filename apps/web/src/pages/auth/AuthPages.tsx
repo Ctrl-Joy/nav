@@ -51,7 +51,7 @@ function Providers({ next, onDisabled }: { next: string | null; onDisabled: (msg
               type="button"
               className="au-provider"
               aria-disabled="true"
-              title={`${PROVIDER_NAMES[p]} sign-in isn't set up on this server`}
+              title={`${PROVIDER_NAMES[p]} sign-in isn't set up on this server. The server's administrator can turn it on.`}
               onClick={() => onDisabled(oauthErrorMessage('provider_disabled', p)!)}
             >
               <ProviderIcon provider={p} />{PROVIDER_NAMES[p]}

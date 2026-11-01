@@ -8,7 +8,9 @@ import { slugify } from '@nav/shared';
 import { one, q, tx, type Client } from '../../db/pool.ts';
 import { HttpError, notFound } from '../../lib/core.ts';
 import * as ser from '../../lib/serialize.ts';
-import { githubOAuthEnabled, oauthExchange } from '../../lib/github.ts';
+import { githubClientId, githubOAuthEnabled, oauthExchange } from '../../lib/github.ts';
+import { ensureProviderSettings, isPlatformAdmin } from '../../lib/providerSettings.ts';
+import { adminRoutes } from './admin.ts';
 import { PROVIDERS, authorizeUrl, callbackUrl, exchange, pkcePair, providerEnabled, type Profile, type ProviderId } from '../../lib/identity.ts';
 import { SESSION_COOKIE, createSession, destroySession, hashPassword, newApiKey, requireUser, verifyPassword } from '../auth.ts';
 import { beginSession } from './mfa.ts';
@@ -53,6 +55,11 @@ function userOut(r: Record<string, any>) {
     recoveryCodesLeft: r.totp_enabled_at ? (r.recovery_codes ?? []).length : 0,
     createdAt: r.created_at,
   };
+}
+
+/** The signed-in user as the dashboard sees it, including whether they administer this NAV instance. */
+async function meOut(r: Record<string, any>) {
+  return { ...userOut(r), isPlatformAdmin: await isPlatformAdmin(r.id) };
 }
 
 export async function uniqueSlug(c: Client | null, table: string, base: string): Promise<string> {
@@ -191,15 +198,18 @@ async function onlySignInMethod(userId: string, dropping: ProviderId): Promise<b
 export async function authRoutes(app: FastifyInstance) {
   const strict = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
-  app.get('/config', async () => ({
-    githubEnabled: githubOAuthEnabled(),
-    githubAppSlug: config.github.appSlug || null,
-    appsDomain: config.appsDomain,
-    edgeHttpPort: config.edgeHttpPort,
-    driver: (await one('SELECT driver FROM nodes ORDER BY last_heartbeat DESC LIMIT 1'))?.driver ?? config.driver,
-    auth: { providers: Object.fromEntries(PROVIDERS.map((p) => [p, providerEnabled(p)])) },
-    version: '0.1.0',
-  }));
+  app.get('/config', async () => {
+    await ensureProviderSettings();
+    return {
+      githubEnabled: githubOAuthEnabled(),
+      githubAppSlug: config.github.appSlug || null,
+      appsDomain: config.appsDomain,
+      edgeHttpPort: config.edgeHttpPort,
+      driver: (await one('SELECT driver FROM nodes ORDER BY last_heartbeat DESC LIMIT 1'))?.driver ?? config.driver,
+      auth: { providers: Object.fromEntries(PROVIDERS.map((p) => [p, providerEnabled(p)])) },
+      version: '0.1.0',
+    };
+  });
 
   // ---- Email + password ----
 
@@ -216,7 +226,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
     await createSession(reply, req, userId);
     const user = await one('SELECT * FROM users WHERE id = $1', [userId]);
-    return reply.status(201).send({ user: userOut(user!), workspaces: await userWorkspaces(userId) });
+    return reply.status(201).send({ user: await meOut(user!), workspaces: await userWorkspaces(userId) });
   });
 
   app.post('/auth/login', strict, async (req, reply) => {
@@ -226,7 +236,7 @@ export async function authRoutes(app: FastifyInstance) {
     const ok = await verifyPassword(body.password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !ok) throw new HttpError(401, 'invalid_credentials', 'incorrect email or password');
     if ((await beginSession(req, reply, user.id)) === 'mfa') return { mfaRequired: true };
-    return { user: userOut(user), workspaces: await userWorkspaces(user.id) };
+    return { user: await meOut(user), workspaces: await userWorkspaces(user.id) };
   });
 
   app.post('/auth/logout', async (req, reply) => {
@@ -237,7 +247,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/me', async (req) => {
     const u = requireUser(req);
     const user = await one('SELECT * FROM users WHERE id = $1', [u.id]);
-    return { user: userOut(user!), workspaces: await userWorkspaces(u.id) };
+    return { user: await meOut(user!), workspaces: await userWorkspaces(u.id) };
   });
 
   // ---- Password reset ----
@@ -280,19 +290,20 @@ export async function authRoutes(app: FastifyInstance) {
     });
     if ((await beginSession(req, reply, userId)) === 'mfa') return { mfaRequired: true };
     const user = await one('SELECT * FROM users WHERE id = $1', [userId]);
-    return { user: userOut(user!), workspaces: await userWorkspaces(userId) };
+    return { user: await meOut(user!), workspaces: await userWorkspaces(userId) };
   });
 
   // ---- External providers ----
 
   app.get('/auth/github', async (req, reply) => {
+    await ensureProviderSettings();
     if (!githubOAuthEnabled()) return reply.redirect(`${config.dashboardUrl}/login?error=provider_disabled&provider=github`);
     const { mode, next } = req.query as { mode?: string; next?: string };
     const state = randomBytes(16).toString('base64url');
     const { verifier, challenge } = pkcePair();
     writeOAuthState(req, reply, { p: 'github', s: state, v: verifier, m: mode === 'connect' && req.user ? 'connect' : 'login', n: safeNext(next) });
     const url = new URL('https://github.com/login/oauth/authorize');
-    url.searchParams.set('client_id', config.github.clientId);
+    url.searchParams.set('client_id', githubClientId());
     url.searchParams.set('redirect_uri', callbackUrl('github'));
     url.searchParams.set('scope', 'read:user user:email repo');
     url.searchParams.set('state', state);
@@ -305,6 +316,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { code, state } = req.query as { code?: string; state?: string };
     const st = readOAuthState(req, reply, 'github', state);
     if (!st || !code) return reply.redirect(`${config.dashboardUrl}/login?error=bad_state`);
+    await ensureProviderSettings();
     let token = '';
     let login = '';
     return finishOAuth(req, reply, 'github', st, async () => {
@@ -324,6 +336,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { mode, next, login_hint: hint } = req.query as { mode?: string; next?: string; login_hint?: string };
     if (!PROVIDERS.includes(provider as ProviderId) || provider === 'github') throw notFound('provider');
     const p = provider as Exclude<ProviderId, 'github'>;
+    await ensureProviderSettings();
     if (!providerEnabled(p)) return reply.redirect(`${config.dashboardUrl}/login?error=provider_disabled&provider=${p}`);
     const state = randomBytes(16).toString('base64url');
     const { verifier, challenge } = pkcePair();
@@ -344,6 +357,7 @@ export async function authRoutes(app: FastifyInstance) {
     const st = readOAuthState(req, reply, p, state);
     if (error === 'access_denied') return reply.redirect(`${config.dashboardUrl}/login?error=cancelled&provider=${p}`);
     if (!st || !code) return reply.redirect(`${config.dashboardUrl}/login?error=bad_state`);
+    await ensureProviderSettings();
     return finishOAuth(req, reply, p, st, () => exchange(p, code, st.v));
   });
 
@@ -425,6 +439,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/identities', async (req) => {
     const u = requireUser(req);
     const rows = await q('SELECT * FROM user_identities WHERE user_id = $1 ORDER BY created_at', [u.id]);
+    await ensureProviderSettings();
     return {
       items: rows.map((r) => ({ provider: r.provider, email: r.email, username: r.username, avatarUrl: r.avatar_url, createdAt: r.created_at, lastUsedAt: r.last_used_at })),
       available: Object.fromEntries(PROVIDERS.map((p) => [p, providerEnabled(p)])),
@@ -496,4 +511,6 @@ export async function authRoutes(app: FastifyInstance) {
     if (!res.length) throw notFound('API key');
     return reply.status(204).send();
   });
+
+  await adminRoutes(app);
 }

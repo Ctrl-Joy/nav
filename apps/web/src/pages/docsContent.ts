@@ -694,11 +694,33 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
       },
       {
         type: 'p',
-        text: "Each provider turns on when its client ID and secret are set. Register the callback URL `<NAV_API_PUBLIC_URL>/api/v1/auth/oauth/<provider>/callback` with GitLab, Bitbucket and Google, and `/api/v1/auth/github/callback` with GitHub. SSO works with any OpenID Connect identity provider for the email domains you list.",
+        text: "GitHub, GitLab, Bitbucket and Google sign-in are off until you add an OAuth app for each one. The easiest way is the dashboard: as an instance administrator, open Instance → Sign-in providers in the sidebar. Each provider's card shows the exact callback URL to register (with a copy button), the scopes NAV asks for, a link to the provider's developer console and short steps. Paste the client ID and secret, then click Save. The button on the sign-in page turns on right away.",
+      },
+      {
+        type: 'list',
+        items: [
+          "GitHub: New OAuth App at `https://github.com/settings/applications/new`. Scopes `read:user user:email repo`.",
+          "GitLab: Applications at `https://gitlab.com/-/user_settings/applications` (Confidential, scope `read_user`). Enter your instance URL on the card for self-managed GitLab.",
+          "Bitbucket: your workspace → Settings → Apps and features → OAuth consumers (`bitbucket.org/<workspace>/workspace/settings/api`). Private consumer with Account: Email and Read.",
+          "Google: Credentials at `https://console.cloud.google.com/apis/credentials` → Create credentials → OAuth client ID → Web application. Scopes `openid email profile`.",
+        ],
+      },
+      {
+        type: 'p',
+        text: "Test checks the credentials with the provider without anyone signing in. For example, it sends a made-up authorization code to the provider's token endpoint: \"bad code\" means the client ID and secret were accepted, and \"bad client\" means they were wrong. It cannot confirm the callback URL or the consent screen, so sign in once to finish checking. Disable deletes the saved credentials. Client secrets are encrypted with `NAV_MASTER_KEY` and are never shown again after you save them.",
+      },
+      {
+        type: 'p',
+        text: "Instance administrators are the accounts whose email is listed in `NAV_ADMIN_EMAILS` (comma-separated). That address must be verified, either by signing in with a provider or by using a password reset link, which is written to the control plane log when no SMTP server is set. Without `NAV_ADMIN_EMAILS`, the first account created on the server is the administrator.",
+      },
+      {
+        type: 'p',
+        text: "Environment variables still work and always take precedence. A provider set this way appears on the admin page as configured by environment and is read-only there. Register `<NAV_API_PUBLIC_URL>/api/v1/auth/oauth/<provider>/callback` with GitLab, Bitbucket and Google, and `<NAV_API_PUBLIC_URL>/api/v1/auth/github/callback` with GitHub. SSO works with any OpenID Connect identity provider for the email domains you list, and it is configured only with environment variables.",
       },
       {
         type: 'code',
-        code: `NAV_GITHUB_CLIENT_ID=...       NAV_GITHUB_CLIENT_SECRET=...
+        code: `NAV_ADMIN_EMAILS=ops@example.com
+NAV_GITHUB_CLIENT_ID=...       NAV_GITHUB_CLIENT_SECRET=...
 NAV_GITLAB_CLIENT_ID=...       NAV_GITLAB_CLIENT_SECRET=...   # NAV_GITLAB_URL for self-managed GitLab
 NAV_BITBUCKET_CLIENT_ID=...    NAV_BITBUCKET_CLIENT_SECRET=...
 NAV_GOOGLE_CLIENT_ID=...       NAV_GOOGLE_CLIENT_SECRET=...

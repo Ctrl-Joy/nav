@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { config } from '@nav/shared/config';
 import { githubOAuthEnabled } from './github.ts';
+import { effectiveProvider } from './providerSettings.ts';
 
 export type ProviderId = 'github' | 'gitlab' | 'bitbucket' | 'google' | 'sso';
 export const PROVIDERS: ProviderId[] = ['github', 'gitlab', 'bitbucket', 'google', 'sso'];
@@ -33,19 +34,21 @@ async function getJson<T>(url: string, token: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Environment variables or admin-saved credentials; routes call ensureProviderSettings() before relying on this. */
 export function providerEnabled(p: ProviderId): boolean {
   switch (p) {
     case 'github': return githubOAuthEnabled();
-    case 'gitlab': return !!(config.oauth.gitlab.clientId && config.oauth.gitlab.clientSecret);
-    case 'bitbucket': return !!(config.oauth.bitbucket.clientId && config.oauth.bitbucket.clientSecret);
-    case 'google': return !!(config.oauth.google.clientId && config.oauth.google.clientSecret);
+    case 'gitlab':
+    case 'bitbucket':
+    case 'google':
+      return effectiveProvider(p).enabled;
     case 'sso': return !!(config.sso.issuer && config.sso.clientId && config.sso.clientSecret && config.sso.domains.length);
   }
 }
 
 export function clientFor(p: Exclude<ProviderId, 'github'>): { id: string; secret: string } {
   if (p === 'sso') return { id: config.sso.clientId, secret: config.sso.clientSecret };
-  const c = config.oauth[p];
+  const c = effectiveProvider(p);
   return { id: c.clientId, secret: c.clientSecret };
 }
 
@@ -68,7 +71,7 @@ async function oidc() {
 async function endpoints(p: Exclude<ProviderId, 'github'>): Promise<Endpoints> {
   switch (p) {
     case 'gitlab': {
-      const base = config.oauth.gitlab.baseUrl;
+      const base = effectiveProvider('gitlab').baseUrl ?? config.oauth.gitlab.baseUrl;
       return {
         authorize: `${base}/oauth/authorize`,
         token: `${base}/oauth/token`,
