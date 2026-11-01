@@ -120,7 +120,9 @@ func (d *serviceDataSource) Metadata(_ context.Context, req datasource.MetadataR
 }
 
 func (d *serviceDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
-	c := func(desc string) schema.StringAttribute { return schema.StringAttribute{MarkdownDescription: desc, Computed: true} }
+	c := func(desc string) schema.StringAttribute {
+		return schema.StringAttribute{MarkdownDescription: desc, Computed: true}
+	}
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Looks up a service by `id`, or by `name` within a workspace.",
 		Attributes: map[string]schema.Attribute{
