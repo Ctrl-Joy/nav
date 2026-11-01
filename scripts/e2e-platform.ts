@@ -167,12 +167,17 @@ await step('OpenTelemetry metrics: OTLP/HTTP JSON with service attributes', asyn
   await new Promise<void>((r) => otlp.listen(0, '127.0.0.1', () => r()));
   try {
     await api('PUT', `/workspaces/${ws}/metrics-stream`, { endpoint: `http://127.0.0.1:${(otlp.address() as net.AddressInfo).port}`, headers: { 'x-api-key': 'k1' } });
-    const r = await until('a push with data', async () => { const t = await api('POST', `/workspaces/${ws}/metrics-stream/test`); return bodies.length ? t : null; }, 60_000);
+    // Instances are sampled every 15 s and an earlier step restarted the service, so keep pushing until a push
+    // carries this service's memory gauge rather than trusting the first one.
+    const hasMemory = (b: { body: any }) => b.body.resourceMetrics.some((x: any) =>
+      x.resource.attributes.some((a: any) => a.key === 'nav.service.id' && a.value.stringValue === svc.id)
+      && x.scopeMetrics[0].metrics.some((m: any) => m.name === 'nav.instance.memory.usage'));
+    const r = await until('a push with this service\'s memory gauge', async () => {
+      const t = await api('POST', `/workspaces/${ws}/metrics-stream/test`);
+      return bodies.some(hasMemory) ? t : null;
+    }, 90_000);
     assert(!r.stream.lastError, `no error: ${r.stream.lastError}`);
-    const b = bodies[0];
-    assert(b.headers['x-api-key'] === 'k1', 'custom headers sent');
-    const rm = b.body.resourceMetrics.find((x: any) => x.resource.attributes.some((a: any) => a.key === 'nav.service.id' && a.value.stringValue === svc.id));
-    assert(rm && rm.scopeMetrics[0].metrics.some((m: any) => m.name === 'nav.instance.memory.usage'), 'memory gauge for the service');
+    assert(bodies.every((b) => b.headers['x-api-key'] === 'k1'), 'custom headers sent');
   } finally {
     await api('DELETE', `/workspaces/${ws}/metrics-stream`).catch(() => {});
     otlp.close();
