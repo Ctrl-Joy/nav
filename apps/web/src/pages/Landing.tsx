@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowRight, ArrowUp, Check, CheckCircle2, ChevronRight, Container,
+  ArrowRight, ArrowUp, Check, ChevronRight, Container,
   Database, Fingerprint, Globe, Layers, Lock,
-  Menu, Moon, Network, Plus, Search, Server, Sun, Users, Webhook, Workflow, X,
+  Menu, Moon, Network, Plus, Search, Sun, Users, Webhook, Workflow, X,
 } from 'lucide-react';
 import { SERVICE_PLANS } from '@nav/shared';
 import { useMe } from '@/api/auth';
@@ -354,11 +354,6 @@ export function LandingPage() {
             <div className="k-actions">
               <Link to={start} className="k-btn k-btn-solid">{signedIn ? 'Open dashboard' : 'Start deploying'} <ChevronRight /></Link>
               <Link to="/docs" className="k-btn k-btn-line">Read the docs</Link>
-            </div>
-            <div className="k-proof">
-              <span><i><Github /> Deploys from</i><b>git push</b></span>
-              <span><i><CheckCircle2 /> E2E</i><b>16/16</b></span>
-              <span><i><Server /> Runtime</i><b>Docker · process</b></span>
             </div>
           </div>
           <HeroBoard />
