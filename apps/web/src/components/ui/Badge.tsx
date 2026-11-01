@@ -86,6 +86,9 @@ const STATUS: Record<string, StatusDef> = {
   verified: { tone: 'success', label: 'Verified' },
   issuing: { tone: 'info', label: 'Issuing', pulse: true },
   issued: { tone: 'success', label: 'Certificate issued' },
+  // sandbox
+  stopping: { tone: 'warning', label: 'Stopping', pulse: true },
+  expired: { tone: 'neutral', label: 'Expired' },
   // blueprint
   syncing: { tone: 'info', label: 'Syncing', pulse: true },
   in_sync: { tone: 'success', label: 'In sync' },

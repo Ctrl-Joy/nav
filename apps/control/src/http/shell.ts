@@ -2,6 +2,7 @@
 //   GET /api/v1/services/:id/shell?instance=<id>&cols=&rows=   (WebSocket upgrade)
 // Session-cookie callers must come from the dashboard's origin (WebSockets are not covered by CORS); API keys
 // are sent in the Authorization header. Developers and above may open a shell; every session is audited.
+// Streaming sandbox execs (GET /api/v1/sandboxes/:id/exec/stream) share this upgrade handler: see sandboxRelay.ts.
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -10,14 +11,15 @@ import { nodeToken } from '@nav/shared/artifacts';
 import { config } from '@nav/shared/config';
 import { one, q } from '../db/pool.ts';
 import { authenticate, workspaceRole, type AuthUser } from './auth.ts';
+import { SANDBOX_STREAM_PATH, relaySandboxStream } from './sandboxRelay.ts';
 
 const PATH = /^\/api\/v1\/services\/([a-z0-9_]+)\/shell$/;
 
-function reject(socket: Duplex, status: number, message: string): void {
+export function reject(socket: Duplex, status: number, message: string): void {
   socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n${message}`);
 }
 
-function cookies(header: string | undefined): Record<string, string> {
+export function cookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (header ?? '').split(';')) {
     const i = part.indexOf('=');
@@ -26,7 +28,7 @@ function cookies(header: string | undefined): Record<string, string> {
   return out;
 }
 
-function sameOrigin(req: IncomingMessage): boolean {
+export function sameOrigin(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
   if (!origin) return false;
   const allowed = new Set([new URL(config.dashboardUrl).origin, new URL(config.apiPublicUrl).origin]);
@@ -38,6 +40,8 @@ export function attachShellRelay(app: FastifyInstance): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1 << 20 });
   app.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://control');
+    const sandbox = SANDBOX_STREAM_PATH.exec(url.pathname);
+    if (sandbox) return relaySandboxStream(wss, req, socket, head, sandbox[1]);
     const m = PATH.exec(url.pathname);
     if (!m) return reject(socket, 404, 'Not Found');
     void (async () => {

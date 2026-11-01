@@ -4,7 +4,8 @@
     "lib": ["ES2023"],
     "types": ["node"],
     "paths": {
-      "@nav/shared": ["../../packages/shared/src/index.ts"]
+      "@nav/shared": ["../../packages/shared/src/index.ts"],
+      "@nav/sandbox": ["../../packages/sandbox/src/index.ts"]
     }
   },
   "include": ["src", "test"]

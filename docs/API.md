@@ -204,6 +204,34 @@ Tools: embedded-postgres ships only `initdb`/`pg_ctl`/`postgres`; set `NAV_PG_BI
 PostgreSQL install (or put it on PATH) for `pg_basebackup`, `pg_upgrade`, `pg_dump`/`pg_restore` and other major versions.
 Without `pg_basebackup`, replicas are cloned with an online base backup over a replication slot.
 
+## Sandboxes
+
+Isolated, short-lived environments for running code (for example from AI agents). Viewers can list and inspect;
+developers create, run commands, move files and snapshot. Every exec is audited (`sandbox.exec`) with its command
+and exit code, never its output. Limits: TTL 60 s – 24 h (default 15 min); 10 live sandboxes per workspace
+(`workspaces.sandbox_limit` overrides); 50 snapshots per workspace; exec timeout 1 – 3600 s (default 60);
+1 MiB of stdout and of stderr per synchronous exec; 64 KiB commands; 1 MiB stdin; 50 MiB per file; 100 env vars;
+8 concurrent commands per sandbox.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/sandbox-plans` | `{plans, images, limits}` |
+| GET | `/workspaces/:ws/sandboxes` | `?status=live\|all` → `{items: Sandbox[]}` |
+| POST | `/workspaces/:ws/sandboxes` | `{runtime?: node\|python\|bash, image?, plan?, ttlSeconds?, env?, networkAccess?: none\|egress, snapshotId?, name?}` → `Sandbox` (201, running); 429 `sandbox_limit` |
+| GET/DELETE | `/sandboxes/:id` | DELETE kills its commands and removes its files (the row stays, status `stopped`) |
+| POST | `/sandboxes/:id/exec` | `{command, cwd?, env?, timeoutSeconds?, stdin?}` → `{exitCode, stdout, stderr, stdoutTruncated, stderrTruncated, timedOut, durationMs}`; on timeout the whole process tree is killed and `exitCode` is null |
+| GET (WS) | `/sandboxes/:id/exec/stream` | WebSocket. Send `{type:'start', command?, cwd?, env?, timeoutSeconds?, tty?, cols?, rows?}` (no command = interactive shell); receive binary frames `[1=stdout\|2=stderr, ...bytes]`, then `{type:'exit', code, timedOut}`. Send binary frames (stdin), `{type:'eof'}`, `{type:'resize', cols, rows}`, `{type:'kill'}` |
+| PUT | `/sandboxes/:id/files?path=&mode=` | raw body (`application/octet-stream`) → `{size}` |
+| GET | `/sandboxes/:id/files?path=` | raw bytes |
+| DELETE | `/sandboxes/:id/files?path=&recursive=1` | |
+| GET | `/sandboxes/:id/ls?path=` | `{items: [{name, path, type, size, modifiedAt}]}` |
+| POST | `/sandboxes/:id/snapshots` | `{name?}` → `SandboxSnapshot` (archives /workspace into the artifact store) |
+| GET | `/workspaces/:ws/sandbox-snapshots` | `?sandboxId=` |
+| GET/DELETE | `/sandbox-snapshots/:id` | |
+
+Paths are relative to `/workspace` (`a/b`, `/a/b` and `/workspace/a/b` are the same file); `..`, backslashes, `:`
+and control characters are refused, and symlinks that lead outside the sandbox are refused (403).
+
 ## Blueprints (Infrastructure as code: `nav.yaml`)
 
 | Method | Path | Notes |

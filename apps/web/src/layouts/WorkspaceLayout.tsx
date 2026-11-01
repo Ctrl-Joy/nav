@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'reac
 import {
   Activity,
   BookOpen,
+  Box,
   Boxes,
   Building2,
   Check,
@@ -78,6 +79,7 @@ const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
       { to: 'key-value', label: 'Key Value', icon: DatabaseZap },
     ],
   },
+  { label: 'Compute', items: [{ to: 'sandboxes', label: 'Sandboxes', icon: Box }] },
   { label: 'Activity', items: [{ to: 'activity', label: 'Events', icon: Activity }] },
   {
     label: 'Workspace',
@@ -105,6 +107,7 @@ const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   'env-groups': { label: 'Environment Groups', icon: Boxes },
   databases: { label: 'Postgres', icon: Database },
   'key-value': { label: 'Key Value', icon: DatabaseZap },
+  sandboxes: { label: 'Sandboxes', icon: Box },
   'audit-logs': { label: 'Audit Logs', icon: FileClock },
   activity: { label: 'Events', icon: Activity },
   usage: { label: 'Usage', icon: Gauge },

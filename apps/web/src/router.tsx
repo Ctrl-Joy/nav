@@ -94,6 +94,8 @@ export const router = createBrowserRouter([
                   { path: 'settings', ...page(() => import('./pages/keyvalue/KeyValueTabs'), 'KeyValueSettingsTab') },
                 ],
               },
+              { path: 'sandboxes', ...page(() => import('./pages/sandboxes/SandboxesList'), 'SandboxesPage') },
+              { path: 'sandboxes/:sandboxId', ...page(() => import('./pages/sandboxes/SandboxDetail'), 'SandboxDetailPage') },
               { path: 'env-groups', ...page(() => import('./pages/envgroups/EnvGroups'), 'EnvGroupsPage') },
               { path: 'env-groups/:groupId', ...page(() => import('./pages/envgroups/EnvGroupDetail'), 'EnvGroupDetailPage') },
               { path: 'blueprints', ...page(() => import('./pages/blueprints/Blueprints'), 'BlueprintsPage') },

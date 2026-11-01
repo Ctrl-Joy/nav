@@ -30,6 +30,7 @@ import { orgRoutes } from './routes/orgs.ts';
 import { samlRoutes } from './routes/saml.ts';
 import { scimRoutes } from './routes/scim.ts';
 import { usageRoutes } from './routes/usage.ts';
+import { sandboxRoutes } from './routes/sandboxes.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SAML_ACS = /^\/api\/v1\/auth\/saml\/[\w-]+\/acs$/;
@@ -122,6 +123,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       await usageRoutes(api);
       // Encapsulated: adds a form-body parser for the IdP's POST.
       await api.register(samlRoutes);
+      // Encapsulated: adds a raw-body parser for file uploads.
+      await api.register(sandboxRoutes);
     },
     { prefix: '/api/v1' },
   );

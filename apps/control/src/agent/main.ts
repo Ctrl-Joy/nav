@@ -18,6 +18,7 @@ import { handleBlueprintPreview, handleBlueprintSync, handleDeleteService, handl
 import { CONTROL_JOBS } from '../scheduler/jobs.ts';
 import { liveNodes } from './cluster.ts';
 import { startShellServer } from './shell.ts';
+import { recoverSandboxes, sandboxManagerFor } from './sandbox/index.ts';
 import { handleDiskRestore, handleDiskSnapshot } from './snapshots.ts';
 import { handleKvDelete, handleKvProvision, handleKvReconfigure, handleKvResume, handleKvSuspend, recoverKeyValues, refreshKvCertificates } from './keyvalue.ts';
 import { InstanceManager } from './instances.ts';
@@ -136,7 +137,10 @@ async function main() {
   const instances = new InstanceManager(driver, nid);
   const ctx: Ctx = { driver, instances, nodeId: nid };
   process.env.NAV_ACTIVE_DRIVER = driver.name;
-  const shellPort = await startShellServer(ctx);
+  const sandboxes = sandboxManagerFor(driver.name);
+  if (sandboxes.disabledReason) console.warn(`[agent] sandboxes unavailable: ${sandboxes.disabledReason}`);
+  else if (!sandboxes.driver.isolated) console.warn('[agent] sandboxes use the process driver: NOT isolated, for development only');
+  const shellPort = await startShellServer(ctx, sandboxes);
 
   await q(
     `INSERT INTO nodes (id, hostname, driver, address, capacity, version, agent_port, last_heartbeat) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
@@ -178,6 +182,7 @@ async function main() {
   const reportCapabilities = async () => q('UPDATE nodes SET capabilities = $2 WHERE id = $1', [nid, await detectCapabilities(driver.name)]);
   await reportCapabilities().catch((e) => console.error('[agent] capability detection', e.message));
   setInterval(() => reportCapabilities().catch(() => {}), 5 * 60_000);
+  await recoverSandboxes(sandboxes, nid).catch((e) => console.error('[agent] sandbox recovery', e.message));
   // Process instances do not survive an agent restart: let the cluster bring their services back to size.
   for (const r of await q("SELECT DISTINCT service_id FROM instances WHERE node_id = $1 AND stopped_at > now() - interval '1 minute'", [nid])) {
     await enqueue('scale', { serviceId: r.service_id }, { concurrencyKey: `svc:${r.service_id}` });
@@ -243,6 +248,12 @@ async function main() {
     console.log('[agent] shutting down: stopping local instances');
     const affected = new Set([...instances.entries.values()].map((e) => e.serviceId));
     await Promise.all([...instances.entries.values()].map((e) => (driver.name === 'process' ? instances.stop(e, 5000) : Promise.resolve())));
+    // Process sandboxes cannot outlive the agent; containers keep running and are adopted on restart.
+    if (sandboxes.driver.name === 'process') {
+      const ids = sandboxes.ids();
+      await sandboxes.destroyAll();
+      if (ids.length) await q("UPDATE sandboxes SET status = 'failed', error = 'the node agent stopped', stopped_at = now() WHERE id = ANY($1) AND status IN ('starting','running')", [ids]).catch(() => {});
+    }
     // Other nodes take over the instances this node just stopped.
     if (driver.name === 'process' && (await liveNodes().catch(() => [])).length > 1) {
       await q('UPDATE nodes SET last_heartbeat = now() - interval \'1 hour\' WHERE id = $1', [nid]).catch(() => {});

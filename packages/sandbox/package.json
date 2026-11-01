@@ -1,0 +1,19 @@
+{
+  "name": "@nav/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript client for NAV Sandboxes: create isolated environments, run commands, move files, snapshot",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nav/shared": "*"
+  }
+}

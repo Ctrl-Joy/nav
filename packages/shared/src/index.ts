@@ -563,3 +563,95 @@ export type UpdateServiceInput = Partial<Omit<CreateServiceInput, 'type' | 'envV
 export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'service';
 }
+
+// --- Sandboxes: short-lived, isolated environments for running untrusted code through the API ---------------
+
+export type SandboxRuntime = 'node' | 'python' | 'bash';
+export type SandboxNetworkAccess = 'none' | 'egress';
+export type SandboxStatus = 'starting' | 'running' | 'stopping' | 'stopped' | 'expired' | 'failed';
+
+export interface SandboxPlan { id: string; name: string; cpu: number; memoryMB: number; diskMB: number; pids: number }
+
+export const SANDBOX_PLANS: SandboxPlan[] = [
+  { id: 'small', name: 'Small', cpu: 0.5, memoryMB: 512, diskMB: 1024, pids: 128 },
+  { id: 'medium', name: 'Medium', cpu: 1, memoryMB: 2048, diskMB: 4096, pids: 256 },
+  { id: 'large', name: 'Large', cpu: 2, memoryMB: 4096, diskMB: 10240, pids: 512 },
+];
+
+/** Default image per runtime (docker driver). The process driver uses the host's own interpreters. */
+export const SANDBOX_IMAGES: Record<SandboxRuntime, string> = {
+  node: 'node:22-bookworm-slim',
+  python: 'python:3.13-slim',
+  bash: 'debian:bookworm-slim',
+};
+
+/** Hard limits, enforced by the control plane (and again by the agent where they bound resource use). */
+export const SANDBOX_LIMITS = {
+  minTtlSeconds: 60,
+  defaultTtlSeconds: 15 * 60,
+  maxTtlSeconds: 24 * 3600,
+  /** Live sandboxes per workspace (workspaces.sandbox_limit overrides it). */
+  maxPerWorkspace: 10,
+  maxSnapshotsPerWorkspace: 50,
+  defaultExecTimeoutSeconds: 60,
+  maxExecTimeoutSeconds: 3600,
+  /** Captured per stream by the synchronous exec endpoint; the rest is dropped and flagged as truncated. */
+  maxOutputBytes: 1024 * 1024,
+  maxCommandBytes: 64 * 1024,
+  maxStdinBytes: 1024 * 1024,
+  maxEnvVars: 100,
+  maxFileBytes: 50 * 1024 * 1024,
+  maxListEntries: 1000,
+  /** Concurrent commands inside one sandbox (sync and streaming together). */
+  maxConcurrentExecs: 8,
+} as const;
+
+export interface Sandbox {
+  id: string;
+  workspaceId: string;
+  name: string | null;
+  runtime: SandboxRuntime | null;
+  image: string;
+  plan: string;
+  networkAccess: SandboxNetworkAccess;
+  status: SandboxStatus;
+  driver: 'process' | 'docker' | null;
+  /** False on the process driver: commands run as plain host processes (development only). */
+  isolated: boolean;
+  nodeId: string | null;
+  envKeys: string[];
+  fromSnapshotId: string | null;
+  ttlSeconds: number;
+  expiresAt: string;
+  execCount: number;
+  lastExecAt: string | null;
+  error: string | null;
+  createdAt: string;
+  stoppedAt: string | null;
+}
+
+export interface SandboxExecResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+export interface SandboxFileEntry { name: string; path: string; type: 'file' | 'dir' | 'symlink' | 'other'; size: number; modifiedAt: string }
+
+export interface SandboxSnapshot {
+  id: string;
+  workspaceId: string;
+  sandboxId: string | null;
+  name: string | null;
+  runtime: SandboxRuntime | null;
+  image: string;
+  status: 'pending' | 'completed' | 'failed';
+  sizeBytes: number | null;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}

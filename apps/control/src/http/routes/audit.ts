@@ -14,12 +14,15 @@ const OWNERS: Record<string, string> = {
   'env-groups': 'env_groups',
   blueprints: 'blueprints',
   projects: 'projects',
+  sandboxes: 'sandboxes',
+  'sandbox-snapshots': 'sandbox_snapshots',
 };
 const SINGULAR: Record<string, string> = {
   services: 'service', databases: 'database', 'key-value': 'key_value', 'env-groups': 'env_group', blueprints: 'blueprint', projects: 'project',
   'custom-domains': 'custom_domain', deploys: 'deploy', runs: 'run', environments: 'environment', 'api-keys': 'api_key', members: 'member',
   invites: 'invite', backups: 'backup', 'env-vars': 'env_var', 'secret-files': 'secret_file', workspaces: 'workspace', webhooks: 'webhook', 'log-streams': 'log_stream', snapshots: 'snapshot',
   orgs: 'org', domains: 'org_domain', saml: 'saml', tokens: 'scim_token', groups: 'scim_group',
+  sandboxes: 'sandbox', 'sandbox-snapshots': 'sandbox_snapshot', files: 'sandbox_file',
 };
 
 /** "POST /services/:id/scale" -> service.scale; "PATCH /services/:id" -> service.update; "POST /workspaces/:ws/services" -> service.create. */
@@ -59,6 +62,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Set by handlers that create an org, so the hook can attribute the change to it. */
     auditOrgId?: string;
+    /** Set by handlers that write their own, richer audit row (sandbox exec: command and exit code). */
+    auditSkip?: boolean;
   }
 }
 
@@ -88,6 +93,7 @@ export async function writeAudit(e: AuditEntry): Promise<void> {
 }
 
 export async function recordAudit(req: FastifyRequest): Promise<void> {
+  if (req.auditSkip) return;
   const pattern = req.routeOptions.url ?? req.url;
   // Sign-in, sign-out and similar are about the person, not a workspace.
   if (/^\/api\/v1\/(auth|webhooks)\//.test(pattern)) return;
@@ -96,7 +102,7 @@ export async function recordAudit(req: FastifyRequest): Promise<void> {
   const params = (req.params ?? {}) as Record<string, string>;
   // Org routes carry :org; workspace changes are also attributed to the workspace's org, for the org-wide log.
   const orgId = params.org ?? req.auditOrgId ?? (workspaceId ? (await one('SELECT org_id FROM workspaces WHERE id = $1', [workspaceId]).catch(() => null))?.org_id ?? null : null);
-  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? Object.keys(req.body as object) : [];
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) && !Buffer.isBuffer(req.body) ? Object.keys(req.body as object) : [];
   await q(
     `INSERT INTO audit_logs (org_id, workspace_id, actor_id, actor_email, actor_kind, action, target_type, target_id, ip, user_agent, data)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,

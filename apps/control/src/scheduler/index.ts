@@ -12,6 +12,7 @@ import { ensurePlatformCertificate } from '../lib/platformTls.ts';
 import { expirePreviewEnvironments } from '../lib/previews.ts';
 import { deleteStoredArtifact } from '@nav/shared/artifacts';
 import { snapshotJob } from '../http/routes/snapshots.ts';
+import { expireSandboxes } from '../lib/sandboxes.ts';
 
 async function withLock(key: number, fn: () => Promise<void>): Promise<void> {
   const c = await pool.connect();
@@ -197,4 +198,5 @@ export function startScheduler(): void {
   every('housekeeping', 10 * 60_000, 9004, housekeepingTick);
   every('daily', 60 * 60_000, 9005, dailyTick);
   every('free-sleep', 60_000, 9006, async () => { await sleepIdleServices(); });
+  every('sandbox-expiry', 10_000, 9007, async () => { await expireSandboxes(); });
 }

@@ -587,6 +587,87 @@ nav domains verify <domainId>`,
     ],
   },
   {
+    slug: 'sandboxes',
+    group: 'Platform',
+    title: 'Sandboxes',
+    blocks: [
+      {
+        type: 'p',
+        text: "Sandboxes are isolated, short-lived environments where code runs through the API: a place to execute code written by an AI agent, run a user's snippet, or test a build step. You create one, run commands in it, move files in and out, and it is deleted automatically when its time to live (TTL) runs out.",
+      },
+      { type: 'h3', text: 'With the SDK', id: 'sandbox-sdk' },
+      {
+        type: 'p',
+        text: "The `@nav/sandbox` package is a small TypeScript client for Node 24+, browsers, Deno and Bun. Authenticate with an API key from Account settings.",
+      },
+      {
+        type: 'code',
+        code: `import { NavSandboxes } from '@nav/sandbox';
+
+const nav = new NavSandboxes({ host: 'https://nav.example.com', token: process.env.NAV_TOKEN!, workspaceId: 'ws_...' });
+
+// A Python sandbox with no network, deleted after 10 minutes.
+const sb = await nav.create({ runtime: 'python', ttlSeconds: 600, env: { MODE: 'test' } });
+
+await sb.writeFile('main.py', 'import sys; print(sum(map(int, sys.stdin.read().split())))');
+const r = await sb.exec('python main.py', { stdin: '1 2 3', timeoutSeconds: 30 });
+console.log(r.exitCode, r.stdout); // 0 '6\\n'
+
+// Stream long-running output instead of waiting for it.
+await sb.execStream('pip install requests', { onStdout: (b) => process.stdout.write(b) });
+
+// Save /workspace and start a fresh sandbox from it later.
+const snap = await sb.snapshot({ name: 'deps-installed' });
+const copy = await nav.create({ snapshotId: snap.id });
+console.log(await copy.readText('main.py'));
+
+await sb.delete();
+await copy.delete();`,
+      },
+      { type: 'h3', text: 'From the CLI', id: 'sandbox-cli' },
+      {
+        type: 'code',
+        code: `nav sandbox create --runtime node --ttl 900
+nav sandbox exec sbx_123 -- node -e "console.log(6 * 7)"
+nav sandbox cp ./script.js sbx_123:script.js
+nav sandbox cp sbx_123:out.json ./out.json
+nav sandbox snapshot sbx_123 --name ready
+nav sandbox ls
+nav sandbox rm sbx_123`,
+      },
+      { type: 'h3', text: 'Isolation', id: 'sandbox-isolation' },
+      {
+        type: 'list',
+        items: [
+          "On the Docker driver each sandbox is its own container: all capabilities dropped, `no-new-privileges`, a read-only root filesystem with a writable `/workspace` volume (plus small tmpfs mounts for `/tmp` and `$HOME`), and the plan's memory, CPU and process limits.",
+          "Sandboxes have no network unless created with `networkAccess: 'egress'`; egress sandboxes share a bridge where they cannot reach each other, and never join a workspace's private network.",
+          "Only the environment variables you pass reach the sandbox. Platform settings, secrets and the master key are never given to it, and env values are not stored by the control plane.",
+          "The process driver (used in development when Docker is not available) is NOT isolated: commands are ordinary processes on the node, in a dedicated directory with a scrubbed environment, killed as a whole process tree on timeout or delete. Agents refuse to run sandboxes on the process driver in production unless `NAV_ALLOW_UNISOLATED_SANDBOXES=1`.",
+        ],
+      },
+      { type: 'h3', text: 'Files and paths', id: 'sandbox-files' },
+      {
+        type: 'p',
+        text: "File paths are relative to `/workspace`: `main.py`, `/main.py` and `/workspace/main.py` name the same file. Paths with `..`, backslashes or `:` are rejected, and so is any path that would leave the sandbox through a symlink.",
+      },
+      { type: 'h3', text: 'Limits', id: 'sandbox-limits' },
+      {
+        type: 'list',
+        items: [
+          "TTL from 60 seconds to 24 hours (default 15 minutes).",
+          "10 live sandboxes and 50 snapshots per workspace.",
+          "Commands time out after 60 seconds by default (up to an hour); the whole process tree is killed.",
+          "A synchronous exec returns at most 1 MiB of stdout and 1 MiB of stderr (flagged as truncated); the streaming exec has no cap.",
+          "Files up to 50 MiB, commands up to 64 KiB, stdin up to 1 MiB, 100 env vars, 8 commands at once per sandbox.",
+        ],
+      },
+      {
+        type: 'p',
+        text: "Every command is recorded in the workspace audit log as `sandbox.exec` with the command and its exit code. Output is never logged.",
+      },
+    ],
+  },
+  {
     slug: 'logs-and-metrics',
     group: 'Operate',
     title: 'Logs and metrics',

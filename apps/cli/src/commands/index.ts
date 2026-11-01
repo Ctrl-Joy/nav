@@ -11,6 +11,7 @@ import { mcpCommands } from './mcp.ts';
 import { metricsCommands } from './metrics.ts';
 import { openCommands } from './open.ts';
 import { serviceCommands } from './services.ts';
+import { sandboxCommands } from './sandbox.ts';
 import { sshCommands } from './ssh.ts';
 import { workspaceCommands } from './workspaces.ts';
 
@@ -28,5 +29,6 @@ export const commands: CommandDef[] = [
   ...metricsCommands,
   ...openCommands,
   ...sshCommands,
+  ...sandboxCommands,
   ...mcpCommands,
 ];
