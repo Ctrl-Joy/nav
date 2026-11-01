@@ -12,7 +12,8 @@ import { githubClientId, githubOAuthEnabled, oauthExchange } from '../../lib/git
 import { ensureProviderSettings, isPlatformAdmin } from '../../lib/providerSettings.ts';
 import { adminRoutes } from './admin.ts';
 import { PROVIDERS, authorizeUrl, callbackUrl, exchange, pkcePair, providerEnabled, type Profile, type ProviderId } from '../../lib/identity.ts';
-import { SESSION_COOKIE, createSession, destroySession, hashPassword, newApiKey, requireUser, verifyPassword } from '../auth.ts';
+import { SESSION_COOKIE, createSession, destroySession, effectiveRole, hashPassword, newApiKey, requireUser, verifyPassword } from '../auth.ts';
+import { assertSsoNotRequired, emailDomain, orgForEmail } from '../../lib/orgs.ts';
 import { beginSession } from './mfa.ts';
 import { layout, sendMail } from '../../lib/mail.ts';
 
@@ -32,12 +33,26 @@ const RESET_TTL_MS = 60 * 60_000;
 const OAUTH_COOKIE = 'nav_oauth';
 const DUMMY_HASH = 'scrypt$32768$8$1$AAAAAAAAAAAAAAAAAAAAAA==$' + 'A'.repeat(86) + '==';
 
+/** Workspaces the user can open: their memberships plus every workspace of orgs they own or administer. */
 export async function userWorkspaces(userId: string) {
   const rows = await q(
-    `SELECT w.*, m.role FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id
-     WHERE m.user_id = $1 ORDER BY w.created_at`,
+    `SELECT w.*, m.role AS ws_role, om.role AS org_role, o.name AS org_name, COALESCE(o.require_2fa, false) AS org_2fa
+     FROM workspaces w
+     LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = $1
+     LEFT JOIN orgs o ON o.id = w.org_id
+     LEFT JOIN org_members om ON om.org_id = w.org_id AND om.user_id = $1
+     WHERE m.user_id IS NOT NULL OR om.role IN ('owner','admin')
+     ORDER BY w.created_at`,
     [userId],
   );
+  return rows.map((r) => ({
+    id: r.id, name: r.name, slug: r.slug, role: effectiveRole(r.ws_role, r.org_role)!, requireTwoFactor: r.require_2fa || r.org_2fa,
+    orgId: r.org_id ?? null, orgName: r.org_name ?? null, createdAt: r.created_at,
+  }));
+}
+
+export async function userOrgs(userId: string) {
+  const rows = await q('SELECT o.*, m.role FROM orgs o JOIN org_members m ON m.org_id = o.id WHERE m.user_id = $1 ORDER BY o.created_at', [userId]);
   return rows.map((r) => ({ id: r.id, name: r.name, slug: r.slug, role: r.role, requireTwoFactor: r.require_2fa, createdAt: r.created_at }));
 }
 
@@ -85,7 +100,7 @@ async function onboardUser(c: Client, userId: string, name: string, email: strin
 }
 
 /** Only same-site relative paths may be used as a post-sign-in destination. */
-function safeNext(next: unknown): string {
+export function safeNext(next: unknown): string {
   return typeof next === 'string' && /^\/(?!\/)[\w\-./?=&%#]*$/.test(next) && !next.includes('\\') ? next : '/app';
 }
 
@@ -179,6 +194,8 @@ async function finishOAuth(req: FastifyRequest, reply: FastifyReply, provider: P
     const userId = await resolveIdentity(provider, profile, connectTo);
     if (after) await after(userId);
     if (connectTo) return reply.redirect(`${config.dashboardUrl}/account?connected=${provider}#connections`);
+    const email = (await one('SELECT email FROM users WHERE id = $1', [userId]))?.email as string;
+    if ((await orgForEmail(email))?.enforce) throw new SignInError('sso_required');
     if ((await beginSession(req, reply, userId, safeNext(st.n))) === 'mfa') return reply.redirect(`${config.dashboardUrl}/login/mfa`);
     return reply.redirect(`${config.dashboardUrl}${safeNext(st.n)}`);
   } catch (err) {
@@ -217,6 +234,8 @@ export async function authRoutes(app: FastifyInstance) {
     const body = Signup.parse(req.body);
     const exists = await one('SELECT 1 FROM users WHERE email = $1', [body.email]);
     if (exists) throw new HttpError(409, 'email_taken', 'an account with that email already exists');
+    // Accounts in a domain whose org enforces SSO are created by signing in through the org's IdP.
+    await assertSsoNotRequired(body.email);
     const userId = id('usr');
     const name = body.name ?? nameFromEmail(body.email);
     const passwordHash = await hashPassword(body.password);
@@ -235,6 +254,7 @@ export async function authRoutes(app: FastifyInstance) {
     // Always run a hash to keep timing uniform whether or not the user exists.
     const ok = await verifyPassword(body.password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !ok) throw new HttpError(401, 'invalid_credentials', 'incorrect email or password');
+    await assertSsoNotRequired(user.email);
     if ((await beginSession(req, reply, user.id)) === 'mfa') return { mfaRequired: true };
     return { user: await meOut(user), workspaces: await userWorkspaces(user.id) };
   });
@@ -247,7 +267,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/auth/me', async (req) => {
     const u = requireUser(req);
     const user = await one('SELECT * FROM users WHERE id = $1', [u.id]);
-    return { user: await meOut(user!), workspaces: await userWorkspaces(u.id) };
+    return { user: await meOut(user!), workspaces: await userWorkspaces(u.id), orgs: await userOrgs(u.id) };
   });
 
   // ---- Password reset ----
@@ -278,6 +298,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/password/reset', strict, async (req, reply) => {
     const body = z.object({ token: z.string().min(20).max(200), password: Password }).parse(req.body);
+    const target = await one('SELECT u.email FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.id = $1', [sha256(body.token)]);
+    if (target) await assertSsoNotRequired(target.email);
     const hash = await hashPassword(body.password);
     const userId = await tx(async (c) => {
       const r = await c.query('UPDATE password_resets SET used_at = now() WHERE id = $1 AND used_at IS NULL AND expires_at > now() RETURNING user_id', [sha256(body.token)]);
@@ -361,10 +383,15 @@ export async function authRoutes(app: FastifyInstance) {
     return finishOAuth(req, reply, p, st, () => exchange(p, code, st.v));
   });
 
-  /** Single sign-on lookup: tells the client where to send a user whose email domain uses the configured IdP. */
+  /**
+   * Single sign-on lookup: tells the client where to send a user whose email domain uses an IdP — the SAML IdP of
+   * the org that verified the domain, else the server-wide OpenID Connect provider.
+   */
   app.post('/auth/sso', strict, async (req) => {
     const { email } = z.object({ email: Email }).parse(req.body);
-    const domain = email.split('@')[1];
+    const domain = emailDomain(email);
+    const org = await orgForEmail(email);
+    if (org?.samlEnabled) return { redirect: `/api/v1/auth/saml/${org.orgId}/login?login_hint=${encodeURIComponent(email)}` };
     if (!providerEnabled('sso') || !config.sso.domains.includes(domain)) {
       throw new HttpError(404, 'sso_not_configured', `single sign-on isn't set up for ${domain}`);
     }

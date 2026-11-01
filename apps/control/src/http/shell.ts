@@ -9,7 +9,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { nodeToken } from '@nav/shared/artifacts';
 import { config } from '@nav/shared/config';
 import { one, q } from '../db/pool.ts';
-import { authenticate, atLeast, type AuthUser } from './auth.ts';
+import { authenticate, workspaceRole, type AuthUser } from './auth.ts';
 
 const PATH = /^\/api\/v1\/services\/([a-z0-9_]+)\/shell$/;
 
@@ -47,13 +47,11 @@ export function attachShellRelay(app: FastifyInstance): void {
       if (!user) return reject(socket, 401, 'Unauthorized');
       if (fake.authKind === 'session' && !sameOrigin(req)) return reject(socket, 403, 'Forbidden');
       const svc = await one('SELECT id, workspace_id, name FROM services WHERE id = $1', [m[1]]);
-      const member = svc && await one(
-        `SELECT m.role, w.require_2fa, u.totp_enabled_at IS NOT NULL AS mfa FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
-         JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND m.user_id = $2`,
-        [svc.workspace_id, user.id],
-      );
-      if (!svc || !member) return reject(socket, 404, 'Not Found');
-      if (!atLeast(member.role, 'developer') || (member.require_2fa && !member.mfa)) return reject(socket, 403, 'Forbidden');
+      if (!svc) return reject(socket, 404, 'Not Found');
+      // Same rules as the API: membership or org role, the workspace's and org's 2FA policy, developer or above.
+      const denied = await workspaceRole(fake, svc.workspace_id, 'developer').then(() => null, (err: { status?: number }) => err.status ?? 404);
+      if (denied === 404) return reject(socket, 404, 'Not Found');
+      if (denied) return reject(socket, 403, 'Forbidden');
       const wanted = url.searchParams.get('instance');
       const inst = await one(
         `SELECT i.id, n.address, n.agent_port FROM instances i JOIN nodes n ON n.id = i.node_id

@@ -10,9 +10,92 @@ export interface MeUser extends User {
   isPlatformAdmin?: boolean;
 }
 
-/** Workspace list item, including its login policy. */
+/** Workspace list item, including its login policy and the org that owns it (null for personal workspaces). */
 export interface WorkspaceInfo extends Workspace {
   requireTwoFactor?: boolean;
+  orgId?: string | null;
+  orgName?: string | null;
+}
+
+export type OrgRole = 'owner' | 'admin' | 'member';
+
+export interface OrgInfo {
+  id: string;
+  name: string;
+  slug: string;
+  role: OrgRole;
+  requireTwoFactor: boolean;
+  createdAt: string;
+}
+
+export interface OrgDetail extends OrgInfo {
+  defaultWorkspaceId: string | null;
+  defaultRole: 'admin' | 'developer' | 'viewer';
+}
+
+export interface OrgMember {
+  userId: string;
+  email: string;
+  name: string;
+  role: OrgRole;
+  mfaEnabled: boolean;
+  scimManaged: boolean;
+  samlLinked: boolean;
+  createdAt: string;
+}
+
+export interface OrgWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  members: number;
+  services: number;
+  databases: number;
+  requireTwoFactor: boolean;
+  createdAt: string;
+}
+
+export interface OrgDomain {
+  id: string;
+  domain: string;
+  verified: boolean;
+  verifiedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  txtName: string;
+  txtValue: string;
+  createdAt: string;
+}
+
+export interface SamlSettings {
+  enabled: boolean;
+  enforce: boolean;
+  configured: boolean;
+  sp: { entityId: string; acsUrl: string; metadataUrl: string; loginUrl: string; certificate: string };
+  idp: {
+    entityId: string | null;
+    ssoUrl: string | null;
+    binding: 'redirect' | 'post';
+    certificates: { subject: string; notAfter: string | null; fingerprint256: string | null }[];
+  };
+  updatedAt: string;
+}
+
+export interface SamlUpdate {
+  metadataXml?: string;
+  entityId?: string;
+  ssoUrl?: string;
+  certificate?: string;
+  binding?: 'redirect' | 'post';
+  enabled: boolean;
+  enforce: boolean;
+}
+
+export interface ScimSettings {
+  baseUrl: string;
+  tokens: { id: string; name: string; prefix: string; createdByEmail: string | null; createdAt: string; lastUsedAt: string | null }[];
+  groups: { id: string; displayName: string; members: number; workspaceId: string | null; workspaceName: string | null; role: 'admin' | 'developer' | 'viewer' | null; updatedAt: string }[];
+  users: { total: number; active: number };
 }
 
 export interface AppConfig {
@@ -48,6 +131,8 @@ export interface IdentityInfo {
 export interface MeResponse {
   user: MeUser;
   workspaces: WorkspaceInfo[];
+  /** Organizations the user belongs to (only on GET /auth/me). */
+  orgs?: OrgInfo[];
 }
 
 /** Password / OAuth sign-in for an account with 2FA: a code is still needed (POST /auth/login/mfa). */
@@ -207,6 +292,9 @@ export interface AuditLogEntry {
   userAgent: string | null;
   data: { method?: string; path?: string; fields?: string[]; [k: string]: unknown } | null;
   createdAt: string;
+  /** Org-wide log only: the workspace an entry belongs to. */
+  workspaceId?: string | null;
+  workspaceName?: string | null;
 }
 
 export interface DiskSnapshot {

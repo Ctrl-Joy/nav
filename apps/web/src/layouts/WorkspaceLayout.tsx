@@ -4,6 +4,7 @@ import {
   Activity,
   BookOpen,
   Boxes,
+  Building2,
   Check,
   ChevronRight,
   ChevronsUpDown,
@@ -37,9 +38,10 @@ import { useKeyValue } from '@/api/keyvalue';
 import { useWorkspaceLiveUpdates } from '@/api/live';
 import { useService } from '@/api/services';
 import { useCreateWorkspace } from '@/api/workspaces';
+import { useCreateOrg } from '@/api/orgs';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LogoMark } from '@/components/Logo';
-import { Button, Dialog, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, Empty, Field, Input, Kbd, useToast } from '@/components/ui';
+import { Button, Checkbox, Dialog, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, Empty, Field, Input, Kbd, useToast } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { LAST_WORKSPACE_KEY, writeLocal } from '@/lib/misc';
 import { setTheme, useTheme } from '@/lib/theme';
@@ -84,6 +86,13 @@ const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
   },
 ];
 
+/** The sidebar, plus an "Organization" link when the workspace belongs to an org the user is a member of. */
+function navGroups(ctx: WorkspaceCtx) {
+  const orgId = ctx.workspace.orgId;
+  if (!orgId || !ctx.orgs.some((o) => o.id === orgId)) return NAV_GROUPS;
+  return NAV_GROUPS.map((g) => (g.label === 'Workspace' ? { ...g, items: [...g.items, { to: `orgs/${orgId}`, label: 'Organization', icon: Building2 }] } : g));
+}
+
 /** Breadcrumb label + icon for the first path segment under /w/:ws. */
 const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   '': { label: 'Overview', icon: LayoutGrid },
@@ -96,6 +105,7 @@ const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   activity: { label: 'Events', icon: Activity },
   'api-keys': { label: 'API Keys', icon: KeyRound },
   settings: { label: 'Workspace settings', icon: Settings },
+  orgs: { label: 'Organization settings', icon: Building2 },
   account: { label: 'Account settings', icon: UserRound },
   services: { label: 'Services', icon: Globe },
   new: { label: 'New service', icon: Plus },
@@ -190,8 +200,75 @@ function CreateWorkspaceDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function WorkspaceSwitcher({ ctx, onNavigate, onCreateWorkspace, className }: { ctx: WorkspaceCtx; onNavigate?: () => void; onCreateWorkspace: () => void; className?: string }) {
+function CreateOrgDialog({ ctx, open, onClose }: { ctx: WorkspaceCtx; open: boolean; onClose: () => void }) {
+  const [name, setName] = useState('');
+  const canMove = !ctx.workspace.orgId && ctx.workspace.role === 'owner';
+  const [moveCurrent, setMoveCurrent] = useState(false);
+  const create = useCreateOrg();
   const navigate = useNavigate();
+  const toast = useToast();
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      const org = await create.mutateAsync({ name: name.trim(), workspaceId: canMove && moveCurrent ? ctx.ws : undefined });
+      toast.success('Organization created', org.name);
+      onClose();
+      setName('');
+      navigate(`/w/${org.defaultWorkspaceId ?? ctx.ws}/orgs/${org.id}`);
+    } catch (err) {
+      toast.fromError(err, 'Could not create organization');
+    }
+  };
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Create an organization"
+      description="An organization owns several workspaces and manages members, verified domains, SAML single sign-on and SCIM in one place."
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" form="create-org" loading={create.isPending} disabled={!name.trim()}>
+            Create organization
+          </Button>
+        </>
+      }
+    >
+      <form id="create-org" onSubmit={submit} className="space-y-4">
+        <Field label="Name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Inc." autoFocus />}</Field>
+        {canMove && <Checkbox checked={moveCurrent} onChange={setMoveCurrent} label={`Move “${ctx.workspace.name}” into it instead of creating a new workspace`} />}
+      </form>
+    </Dialog>
+  );
+}
+
+function WorkspaceSwitcher({ ctx, onNavigate, onCreateWorkspace, onCreateOrg, className }: { ctx: WorkspaceCtx; onNavigate?: () => void; onCreateWorkspace: () => void; onCreateOrg: () => void; className?: string }) {
+  const navigate = useNavigate();
+  // Personal workspaces first, then each organization's workspaces under its name.
+  const groups = useMemo(() => {
+    const personal = ctx.workspaces.filter((w) => !w.orgId);
+    const orgIds = [...new Set(ctx.workspaces.filter((w) => w.orgId).map((w) => w.orgId!)), ...ctx.orgs.map((o) => o.id)];
+    const byOrg = [...new Set(orgIds)].map((id) => ({
+      id,
+      name: ctx.orgs.find((o) => o.id === id)?.name ?? ctx.workspaces.find((w) => w.orgId === id)?.orgName ?? 'Organization',
+      member: ctx.orgs.some((o) => o.id === id),
+      items: ctx.workspaces.filter((w) => w.orgId === id),
+    }));
+    return { personal, byOrg };
+  }, [ctx.workspaces, ctx.orgs]);
+  const item = (w: WorkspaceCtx['workspaces'][number]) => (
+    <DropdownItem
+      key={w.id}
+      icon={w.id === ctx.ws ? <Check className="size-4 text-accent" /> : <span />}
+      onSelect={() => {
+        onNavigate?.();
+        navigate(`/w/${w.id}`);
+      }}
+      hint={<span className="capitalize">{w.role}</span>}
+    >
+      {w.name}
+    </DropdownItem>
+  );
   return (
     <Dropdown
       className={cn('h-full', className)}
@@ -209,23 +286,32 @@ function WorkspaceSwitcher({ ctx, onNavigate, onCreateWorkspace, className }: { 
         </button>
       )}
     >
-      <DropdownLabel>Workspaces</DropdownLabel>
-      {ctx.workspaces.map((w) => (
-        <DropdownItem
-          key={w.id}
-          icon={w.id === ctx.ws ? <Check className="size-4 text-accent" /> : <span />}
-          onSelect={() => {
-            onNavigate?.();
-            navigate(`/w/${w.id}`);
-          }}
-          hint={<span className="capitalize">{w.role}</span>}
-        >
-          {w.name}
-        </DropdownItem>
+      {groups.personal.length > 0 && <DropdownLabel>{groups.byOrg.length ? 'Personal' : 'Workspaces'}</DropdownLabel>}
+      {groups.personal.map(item)}
+      {groups.byOrg.map((g, i) => (
+        <div key={g.id}>
+          {(groups.personal.length > 0 || i > 0) && <DropdownSeparator />}
+          <DropdownLabel>{g.name}</DropdownLabel>
+          {g.items.map(item)}
+          {g.member && (
+            <DropdownItem
+              icon={<Building2 className="size-4" strokeWidth={1.75} />}
+              onSelect={() => {
+                onNavigate?.();
+                navigate(`/w/${ctx.ws}/orgs/${g.id}`);
+              }}
+            >
+              Organization settings
+            </DropdownItem>
+          )}
+        </div>
       ))}
       <DropdownSeparator />
       <DropdownItem icon={<Plus className="size-4" />} onSelect={onCreateWorkspace}>
         Create workspace
+      </DropdownItem>
+      <DropdownItem icon={<Building2 className="size-4" strokeWidth={1.75} />} onSelect={onCreateOrg}>
+        Create organization
       </DropdownItem>
     </Dropdown>
   );
@@ -250,7 +336,7 @@ function Sidebar({
   return (
     <div className="flex h-full flex-col">
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto py-3">
-        {NAV_GROUPS.map((g, gi) => (
+        {navGroups(ctx).map((g, gi) => (
           <div key={g.label ?? gi} className={cn(gi > 0 && (collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5'))}>
             {g.label && !collapsed && <div className="nv-label px-3 pb-2">{g.label}</div>}
             <ul>
@@ -496,6 +582,7 @@ export function WorkspaceLayout() {
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
   const [createWs, setCreateWs] = useState(false);
+  const [createOrg, setCreateOrg] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const liveState = useWorkspaceLiveUpdates(workspaceId || undefined);
 
@@ -504,7 +591,7 @@ export function WorkspaceLayout() {
     if (!data) return null;
     const workspace = data.workspaces.find((w) => w.id === workspaceId || w.slug === workspaceId);
     if (!workspace) return null;
-    return { ws: workspace.id, workspace, workspaces: data.workspaces, user: data.user, role: workspace.role, ...roleCaps(workspace.role), config: config.data };
+    return { ws: workspace.id, workspace, workspaces: data.workspaces, orgs: data.orgs ?? [], user: data.user, role: workspace.role, ...roleCaps(workspace.role), config: config.data };
   }, [me.data, workspaceId, config.data]);
 
   useEffect(() => {
@@ -582,7 +669,7 @@ export function WorkspaceLayout() {
             <LogoMark className="h-[15px]" />
           </Link>
           <div className="hidden w-[194px] shrink-0 border-r border-border min-[900px]:block">
-            <WorkspaceSwitcher ctx={ctx} onCreateWorkspace={() => setCreateWs(true)} className="w-full" />
+            <WorkspaceSwitcher ctx={ctx} onCreateWorkspace={() => setCreateWs(true)} onCreateOrg={() => setCreateOrg(true)} className="w-full" />
           </div>
           <Breadcrumb ws={ctx.ws} />
           <div className="ml-auto flex h-full items-stretch">
@@ -640,7 +727,7 @@ export function WorkspaceLayout() {
               <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-bg">
                 <div className="flex h-[46px] shrink-0 items-stretch border-b border-border">
                   <div className="min-w-0 flex-1">
-                    <WorkspaceSwitcher ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} className="w-full" />
+                    <WorkspaceSwitcher ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} onCreateOrg={() => setCreateOrg(true)} className="w-full" />
                   </div>
                   <button
                     type="button"
@@ -671,6 +758,7 @@ export function WorkspaceLayout() {
       </div>
       <CommandPalette ws={ctx.ws} open={palette} onClose={() => setPalette(false)} canWrite={ctx.canWrite} />
       <CreateWorkspaceDialog open={createWs} onClose={() => setCreateWs(false)} />
+      <CreateOrgDialog ctx={ctx} open={createOrg} onClose={() => setCreateOrg(false)} />
     </WorkspaceContext.Provider>
   );
 }

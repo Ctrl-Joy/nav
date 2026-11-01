@@ -6,6 +6,7 @@ import { id } from '@nav/shared/ids';
 import type { Role } from '@nav/shared';
 import { one, q } from '../db/pool.ts';
 import { HttpError, forbidden, notFound } from '../lib/core.ts';
+import { ORG_RANK, type OrgRole } from '../lib/orgs.ts';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: object) => Promise<Buffer>;
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -96,17 +97,50 @@ export function atLeast(role: Role, min: Role): boolean {
   return RANK[role] >= RANK[min];
 }
 
+/**
+ * A user's role in a workspace: their own membership, raised by their role in the org that owns the workspace
+ * (org owners act as workspace owners, org admins as admins). Null when they have neither.
+ */
+export function effectiveRole(wsRole: Role | null, orgRole: OrgRole | null): Role | null {
+  const fromOrg: Role | null = orgRole === 'owner' ? 'owner' : orgRole === 'admin' ? 'admin' : null;
+  if (!wsRole) return fromOrg;
+  if (!fromOrg) return wsRole;
+  return RANK[fromOrg] > RANK[wsRole] ? fromOrg : wsRole;
+}
+
+const MFA_REQUIRED = 'two-factor authentication is required here — turn it on in your account settings';
+
 /** Ensures the caller is a member of the workspace with at least `min` role; returns their role. */
 export async function workspaceRole(req: FastifyRequest, workspaceId: string, min: Role = 'viewer'): Promise<Role> {
   const user = requireUser(req);
-  const row = await one<{ role: Role; require_2fa: boolean; mfa: boolean }>(
-    `SELECT m.role, w.require_2fa, u.totp_enabled_at IS NOT NULL AS mfa FROM workspace_members m
-     JOIN workspaces w ON w.id = m.workspace_id JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND m.user_id = $2`,
+  const row = await one<{ ws_role: Role | null; org_role: OrgRole | null; require_2fa: boolean; mfa: boolean }>(
+    `SELECT m.role AS ws_role, om.role AS org_role, (w.require_2fa OR COALESCE(o.require_2fa, false)) AS require_2fa,
+       u.totp_enabled_at IS NOT NULL AS mfa
+     FROM workspaces w JOIN users u ON u.id = $2
+     LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = u.id
+     LEFT JOIN orgs o ON o.id = w.org_id
+     LEFT JOIN org_members om ON om.org_id = w.org_id AND om.user_id = u.id
+     WHERE w.id = $1`,
     [workspaceId, user.id],
   );
-  if (!row) throw notFound('workspace');
-  if (row.require_2fa && !row.mfa) throw new HttpError(403, 'mfa_required', 'this workspace requires two-factor authentication — turn it on in your account settings');
-  if (!atLeast(row.role, min)) throw forbidden();
+  const role = row ? effectiveRole(row.ws_role, row.org_role) : null;
+  if (!row || !role) throw notFound('workspace');
+  if (row.require_2fa && !row.mfa) throw new HttpError(403, 'mfa_required', MFA_REQUIRED);
+  if (!atLeast(role, min)) throw forbidden();
+  return role;
+}
+
+/** Ensures the caller belongs to the org with at least `min` role; returns their role. Non-members get a 404. */
+export async function orgRole(req: FastifyRequest, orgId: string, min: OrgRole = 'member'): Promise<OrgRole> {
+  const user = requireUser(req);
+  const row = await one<{ role: OrgRole; require_2fa: boolean; mfa: boolean }>(
+    `SELECT m.role, o.require_2fa, u.totp_enabled_at IS NOT NULL AS mfa FROM org_members m
+     JOIN orgs o ON o.id = m.org_id JOIN users u ON u.id = m.user_id WHERE m.org_id = $1 AND m.user_id = $2`,
+    [orgId, user.id],
+  );
+  if (!row) throw notFound('organization');
+  if (row.require_2fa && !row.mfa) throw new HttpError(403, 'mfa_required', MFA_REQUIRED);
+  if (ORG_RANK[row.role] < ORG_RANK[min]) throw forbidden();
   return row.role;
 }
 

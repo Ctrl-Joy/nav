@@ -25,8 +25,12 @@ import { snapshotRoutes } from './routes/snapshots.ts';
 import { outboundWebhookRoutes } from './routes/outboundWebhooks.ts';
 import { auditRoutes, recordAudit } from './routes/audit.ts';
 import { platformRoutes } from './routes/platform.ts';
+import { orgRoutes } from './routes/orgs.ts';
+import { samlRoutes } from './routes/saml.ts';
+import { scimRoutes } from './routes/scim.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
+const SAML_ACS = /^\/api\/v1\/auth\/saml\/[\w-]+\/acs$/;
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -60,7 +64,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.header('cache-control', 'no-store');
     await authenticate(req);
     // CSRF: cookie-authenticated mutations must carry a custom header (cannot be sent cross-site without CORS).
-    if (req.authKind === 'session' && !SAFE.has(req.method) && req.headers['x-nav-csrf'] !== '1') {
+    // The SAML ACS is posted by the IdP's form; it is authenticated by the signed, single-use assertion instead.
+    if (req.authKind === 'session' && !SAFE.has(req.method) && req.headers['x-nav-csrf'] !== '1' && !SAML_ACS.test(req.url.split('?')[0])) {
       throw new HttpError(403, 'csrf', 'missing X-NAV-CSRF header');
     }
   });
@@ -110,9 +115,14 @@ export async function buildApp(): Promise<FastifyInstance> {
       await blueprintRoutes(api);
       await webhookRoutes(api);
       await platformRoutes(api);
+      await orgRoutes(api);
+      // Encapsulated: adds a form-body parser for the IdP's POST.
+      await api.register(samlRoutes);
     },
     { prefix: '/api/v1' },
   );
+
+  await app.register(scimRoutes, { prefix: '/scim/v2' });
 
   await app.register(internalRoutes, { prefix: '/internal/v1' });
 

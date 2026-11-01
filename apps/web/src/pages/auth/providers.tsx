@@ -17,6 +17,14 @@ export function oauthErrorMessage(code: string | null, provider: string | null):
     case 'identity_in_use': return `That ${p} account is already connected to a different NAV account.`;
     case 'already_connected': return `Your NAV account is already connected to a different ${p} account.`;
     case 'session_expired': return 'Sign in again to connect an account.';
+    case 'sso_required': return 'Your organization requires single sign-on. Use "Sign in with SSO" with your work email.';
+    case 'saml_not_configured': return "Single sign-on isn't turned on for this organization.";
+    case 'saml_expired': return 'Your single sign-on attempt expired or was already used. Please try again.';
+    case 'saml_unsolicited': return 'Start single sign-on from the NAV sign-in page ("Sign in with SSO").';
+    case 'saml_invalid': return "We couldn't verify the response from your identity provider. Ask your admin to check the SAML settings.";
+    case 'saml_no_email': return "Your identity provider didn't send an email address. Ask your admin to map the email attribute.";
+    case 'saml_domain': return "Your email address isn't in a domain your organization has verified.";
+    case 'saml_deprovisioned': return 'Your access was removed by your organization. Contact your admin.';
     default: return `We couldn't sign you in with ${p}. Please try again.`;
   }
 }

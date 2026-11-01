@@ -49,6 +49,40 @@ Lists: `{ "items": [...], "nextCursor": null }` (cursor pagination via `?cursor=
 | GET | `/workspaces/:ws/events` | activity feed `Page<Event>` |
 | GET | `/workspaces/:ws/notifications` / PUT | `{webhookUrl, notifyOn}` |
 
+## Organizations, SAML SSO, SCIM
+
+An org owns several workspaces. Org roles: `owner` > `admin` > `member`; org owners/admins act as owners/admins in
+every workspace of the org. Personal workspaces (no org) are unchanged. `/auth/me` also returns `orgs`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET / POST | `/orgs` | list mine / `{name, workspaceId?}` — creates the org with a new workspace, or around a workspace you own |
+| GET / PATCH / DELETE | `/orgs/:org` | `{name?, requireTwoFactor?, defaultWorkspaceId?, defaultRole?}` (admin); delete needs no workspaces left (owner) |
+| GET / POST | `/orgs/:org/members` | `{email, role}` adds an existing account |
+| PATCH / DELETE | `/orgs/:org/members/:userId` | `{role}`; removal also removes them from the org's workspaces; last owner is protected |
+| GET / POST | `/orgs/:org/workspaces` | members see their own; admins see all / `{name}` |
+| POST | `/orgs/:org/workspaces/:workspaceId/attach` · `/detach` | move a workspace you own in (admin) / out (owner) |
+| GET / POST | `/orgs/:org/domains` | `{domain}` → `{txtName: "_nav-verify.<domain>", txtValue: "nav-verify=<token>", ...}` |
+| POST / DELETE | `/orgs/:org/domains/:domainId/verify` · `/orgs/:org/domains/:domainId` | checks the TXT record |
+| GET / PUT / DELETE | `/orgs/:org/saml` | SP details + IdP settings / `{metadataXml}` or `{entityId, ssoUrl, certificate, binding}`, plus `{enabled, enforce}` |
+| GET | `/orgs/:org/scim` | base URL, tokens, pushed groups |
+| POST / DELETE | `/orgs/:org/scim/tokens` · `/orgs/:org/scim/tokens/:tokenId` | token is shown once (stored hashed) |
+| PATCH | `/orgs/:org/scim/groups/:groupId` | `{workspaceId, role}` maps a SCIM group to a workspace role (or `null`s to unmap) |
+| GET | `/orgs/:org/audit-logs` | org settings, SAML sign-ins, SCIM changes and all the org's workspaces |
+
+SAML (service provider, per org; SP-initiated only):
+`GET /auth/saml/:org/metadata`, `GET /auth/saml/:org/login?next=` (signed AuthnRequest, redirect or POST binding),
+`POST /auth/saml/:org/acs`. Responses must be signed (Response or Assertion) by a configured IdP certificate, for our
+audience/ACS, within NotBefore/NotOnOrAfter (90 s skew), answering a request we issued (single use), with an email in
+a verified domain. Users are provisioned just in time into the default workspace; sessions go through 2FA.
+`POST /auth/sso {email}` routes to the org's SAML login when the domain is verified by an org with SAML on. With
+`enforce`, password sign-in, sign-up, password reset and OAuth are refused for that domain (`403 sso_required`).
+
+SCIM 2.0 at `/scim/v2` (not under `/api/v1`), `Authorization: Bearer nav_scim_…`: `Users` (list with
+`filter=userName eq "…"`, get, create, PUT, PATCH incl. `active: false`, DELETE), `Groups` (same verbs; members),
+`ServiceProviderConfig`, `ResourceTypes`, `Schemas`. Deactivating or deleting a user removes them from the org and
+its workspaces and revokes their sessions and API keys. Users must have an email in a verified domain.
+
 ## Git
 
 | Method | Path | Notes |

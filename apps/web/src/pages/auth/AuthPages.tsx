@@ -207,8 +207,9 @@ export function SsoPage() {
       onSuccess: ({ redirect }) => {
         const url = new URL(redirect, window.location.origin);
         if (next) url.searchParams.set('next', next);
-        // Same-origin API path that 302s to the identity provider.
-        if (url.origin === window.location.origin && url.pathname.startsWith('/api/v1/auth/oauth/sso/')) window.location.assign(url.toString());
+        // Same-origin API path that 302s to the identity provider (the org's SAML IdP, or the server's OIDC provider).
+        const sameOrigin = url.origin === window.location.origin;
+        if (sameOrigin && (url.pathname.startsWith('/api/v1/auth/oauth/sso/') || /^\/api\/v1\/auth\/saml\/[\w-]+\/login$/.test(url.pathname))) window.location.assign(url.toString());
       },
     });
   };

@@ -98,6 +98,7 @@ export const router = createBrowserRouter([
               { path: 'activity', ...page(() => import('./pages/Activity'), 'ActivityPage') },
               { path: 'settings', ...page(() => import('./pages/settings/WorkspaceSettings'), 'WorkspaceSettingsPage') },
               { path: 'audit-logs', ...page(() => import('./pages/settings/AuditLogs'), 'AuditLogsPage') },
+              { path: 'orgs/:orgId', ...page(() => import('./pages/settings/OrgSettings'), 'OrgSettingsPage') },
               { path: 'api-keys', ...page(() => import('./pages/settings/ApiKeys'), 'ApiKeysPage') },
               { path: 'account', ...page(() => import('./pages/account/AccountSettings'), 'AccountSettingsPage') },
               { path: 'admin', element: <Navigate to="sign-in" replace /> },

@@ -10,6 +10,13 @@ export const qk = {
   sessions: ['auth', 'sessions'] as const,
   identities: ['auth', 'identities'] as const,
   workspaces: ['workspaces'] as const,
+  org: (org: string) => ['org', org] as const,
+  orgMembers: (org: string) => ['org', org, 'members'] as const,
+  orgWorkspaces: (org: string) => ['org', org, 'workspaces'] as const,
+  orgDomains: (org: string) => ['org', org, 'domains'] as const,
+  orgSaml: (org: string) => ['org', org, 'saml'] as const,
+  orgScim: (org: string) => ['org', org, 'scim'] as const,
+  orgAuditLogs: (org: string, f: { action?: string; actor?: string }) => ['org', org, 'audit-logs', f] as const,
   branches: (repoUrl: string) => ['git', 'branches', repoUrl] as const,
 
   ws: (ws: string) => ['ws', ws] as const,
