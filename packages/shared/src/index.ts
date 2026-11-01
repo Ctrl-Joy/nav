@@ -70,7 +70,44 @@ export const KEY_VALUE_PLANS: Plan[] = [
   { id: 'pro-plus', name: 'Pro Plus', cpu: 2, memoryMB: 10240, priceMonthly: 250, kind: 'database' },
 ];
 
-export const KEY_VALUE_POLICIES = ['allkeys-lru', 'noeviction', 'allkeys-lfu', 'volatile-lru', 'volatile-lfu', 'allkeys-random', 'volatile-random', 'volatile-ttl'] as const;
+/** Usage estimates prorate monthly prices over this many hours (730, an average month). */
+export const HOURS_PER_MONTH = 730;
+/** Estimated price of persistent disk storage per GB-month. */
+export const DISK_PRICE_GB_MONTH = 0.25;
+
+/** GET /workspaces/:ws/usage?month=YYYY-MM. Costs are estimates from plan prices: NAV does not bill. */
+export interface UsagePlanLine { plan: string; planName: string; hours: number; estimatedCost: number }
+export interface UsageReport {
+  month: string;                       // YYYY-MM (UTC)
+  start: string;
+  end: string;
+  /** The month is still in progress: usage runs up to now. */
+  partial: boolean;
+  generatedAt: string;
+  disclaimer: string;
+  totals: {
+    instanceHours: number;
+    bandwidthBytes: number;
+    buildMinutes: number;
+    diskGBMonths: number;
+    databaseHours: number;
+    keyValueHours: number;
+    estimatedCost: number;
+  };
+  instanceHoursByPlan: UsagePlanLine[];
+  databaseHoursByPlan: UsagePlanLine[];
+  keyValueHoursByPlan: UsagePlanLine[];
+  services: {
+    id: string; name: string; type: string | null; deleted: boolean;
+    instanceHours: number; plans: UsagePlanLine[]; bandwidthBytes: number; buildMinutes: number; diskGBMonths: number; estimatedCost: number;
+  }[];
+  databases: { id: string; name: string; deleted: boolean; hours: number; plans: UsagePlanLine[]; storageGBMonths: number; estimatedCost: number }[];
+  keyValues: { id: string; name: string; deleted: boolean; hours: number; plans: UsagePlanLine[]; estimatedCost: number }[];
+  /** One entry per UTC day of the month (future days omitted). */
+  daily: { day: string; instanceHours: number; bandwidthBytes: number }[];
+}
+
+export const KEY_VALUE_POLICIES =['allkeys-lru', 'noeviction', 'allkeys-lfu', 'volatile-lru', 'volatile-lfu', 'allkeys-random', 'volatile-random', 'volatile-ttl'] as const;
 
 export interface User {
   id: string;

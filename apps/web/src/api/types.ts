@@ -322,7 +322,10 @@ export interface KeyValue {
   ipAllowList: { cidr: string; description: string }[];
   /** Password masked; reveal through GET /key-value/:id/credentials. */
   internalUrl: string | null;
+  /** rediss:// through the node's TLS proxy; null while external access is off (or the proxy is starting). */
   externalUrl: string | null;
+  /** Certificate the TLS endpoint serves: the platform wildcard, or the node's self-signed one. */
+  externalTls: { certificate: 'platform' | 'self-signed'; fingerprint: string | null } | null;
   createdAt: string;
 }
 

@@ -18,11 +18,16 @@ export function keyValueOut(r: Row) {
   const internalHost = r.driver === 'docker' ? r.slug : r.host;
   const internalPort = r.driver === 'docker' ? 6379 : r.port;
   const ok = r.status === 'available';
+  // External access is TLS only, through the agent's proxy. With the platform wildcard certificate clients verify
+  // <slug>.<appsDomain>; with the node's self-signed one they connect by IP and must pin or skip verification.
+  const tls = ok && (r.ip_allow_list ?? []).length && r.tls_port && r.tls_cert ? { certificate: r.tls_cert as 'platform' | 'self-signed', fingerprint: r.tls_fingerprint ?? null } : null;
+  const externalHost = tls?.certificate === 'platform' ? `${r.slug}.${config.appsDomain}` : config.edgePublicIp;
   return {
     id: r.id, workspaceId: r.workspace_id, environmentId: r.environment_id, name: r.name, slug: r.slug, plan: r.plan,
     maxmemoryPolicy: r.maxmemory_policy, status: r.status, ipAllowList: r.ip_allow_list,
     internalUrl: ok ? `redis://default:${pw}@${internalHost}:${internalPort}` : null,
-    externalUrl: ok && (r.ip_allow_list ?? []).length ? `redis://default:${pw}@${config.edgePublicIp}:${r.port}` : null,
+    externalUrl: tls ? `rediss://default:${pw}@${externalHost}:${r.tls_port}` : null,
+    externalTls: tls,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }

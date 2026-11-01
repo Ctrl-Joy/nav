@@ -11,6 +11,7 @@ import {
   Database,
   DatabaseZap,
   FileStack,
+  Gauge,
   FolderKanban,
   FileClock,
   Globe,
@@ -57,6 +58,8 @@ interface NavItem {
   end?: boolean;
   /** Only shown to workspace admins. */
   admin?: boolean;
+  /** Only shown to developers and above. */
+  write?: boolean;
 }
 
 const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
@@ -79,6 +82,7 @@ const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
   {
     label: 'Workspace',
     items: [
+      { to: 'usage', label: 'Usage', icon: Gauge, write: true },
       { to: 'api-keys', label: 'API Keys', icon: KeyRound },
       { to: 'audit-logs', label: 'Audit Logs', icon: FileClock, admin: true },
       { to: 'settings', label: 'Settings', icon: Settings },
@@ -103,6 +107,7 @@ const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   'key-value': { label: 'Key Value', icon: DatabaseZap },
   'audit-logs': { label: 'Audit Logs', icon: FileClock },
   activity: { label: 'Events', icon: Activity },
+  usage: { label: 'Usage', icon: Gauge },
   'api-keys': { label: 'API Keys', icon: KeyRound },
   settings: { label: 'Workspace settings', icon: Settings },
   orgs: { label: 'Organization settings', icon: Building2 },
@@ -340,7 +345,7 @@ function Sidebar({
           <div key={g.label ?? gi} className={cn(gi > 0 && (collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5'))}>
             {g.label && !collapsed && <div className="nv-label px-3 pb-2">{g.label}</div>}
             <ul>
-              {g.items.filter((n) => !n.admin || ctx.isAdmin).map((n) => (
+              {g.items.filter((n) => (!n.admin || ctx.isAdmin) && (!n.write || ctx.canWrite)).map((n) => (
                 <li key={n.label}>
                   <NavLink
                     to={`/w/${ctx.ws}${n.to ? `/${n.to}` : ''}`}

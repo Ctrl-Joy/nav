@@ -102,6 +102,7 @@ export const router = createBrowserRouter([
               { path: 'templates', ...page(() => import('./pages/Templates'), 'TemplatesPage') },
               { path: 'projects', ...page(() => import('./pages/Projects'), 'ProjectsPage') },
               { path: 'activity', ...page(() => import('./pages/Activity'), 'ActivityPage') },
+              { path: 'usage', ...page(() => import('./pages/Usage'), 'UsagePage') },
               { path: 'settings', ...page(() => import('./pages/settings/WorkspaceSettings'), 'WorkspaceSettingsPage') },
               { path: 'audit-logs', ...page(() => import('./pages/settings/AuditLogs'), 'AuditLogsPage') },
               { path: 'orgs/:orgId', ...page(() => import('./pages/settings/OrgSettings'), 'OrgSettingsPage') },

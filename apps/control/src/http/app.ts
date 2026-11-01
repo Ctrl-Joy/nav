@@ -29,6 +29,7 @@ import { platformRoutes } from './routes/platform.ts';
 import { orgRoutes } from './routes/orgs.ts';
 import { samlRoutes } from './routes/saml.ts';
 import { scimRoutes } from './routes/scim.ts';
+import { usageRoutes } from './routes/usage.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SAML_ACS = /^\/api\/v1\/auth\/saml\/[\w-]+\/acs$/;
@@ -118,6 +119,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await webhookRoutes(api);
       await platformRoutes(api);
       await orgRoutes(api);
+      await usageRoutes(api);
       // Encapsulated: adds a form-body parser for the IdP's POST.
       await api.register(samlRoutes);
     },

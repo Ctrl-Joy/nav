@@ -8,7 +8,8 @@
     "./config": "./src/config.ts",
     "./crypto": "./src/crypto.ts",
     "./ids": "./src/ids.ts",
-    "./artifacts": "./src/artifacts.ts"
+    "./artifacts": "./src/artifacts.ts",
+    "./cidr": "./src/cidr.ts"
   },
   "dependencies": {
     "tar-stream": "3.2.2"

@@ -1,5 +1,7 @@
 // Key Value: Redis-compatible instances on this node. Docker driver: the Valkey image with an append-only volume.
 // Process driver: valkey-server (or redis-server) from PATH, supervised by the agent.
+// The server's plaintext port is bound to the node's private interface only. External access (an IP allow list is
+// set) goes through a TLS-terminating proxy on its own port that enforces the allow list (kvTls.ts).
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,6 +12,7 @@ import { KEY_VALUE_PLANS } from '@nav/shared';
 import { one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
 import type { Ctx } from './handlers.ts';
+import { allowRules, kvCertificate, startTlsProxy, type KvCert, type TlsProxy } from './kvTls.ts';
 import { freePort, isWin, killTree, pipeLines, shipLog } from './util.ts';
 
 const execFileP = promisify(execFile);
@@ -17,6 +20,11 @@ const IMAGE = 'valkey/valkey:8-alpine';
 const kvDir = (id: string) => path.join(config.dataDir, 'keyvalue', id);
 const kvLog = (kv: Row, message: string, level = 'info') => shipLog({ databaseId: kv.id, stream: 'system' }, message, level);
 const running = new Map<string, ChildProcess>();
+const proxies = new Map<string, TlsProxy>();
+let certificate: KvCert | null = null;
+const loadCertificate = () => kvCertificate((sql, params) => q<{ cert_pem: string; key_enc: string }>(sql, params));
+/** Where the proxies reach an instance: its private port on this node. */
+const upstreamHost = () => (['', '0.0.0.0', '::'].includes(config.nodeBindIp) ? '127.0.0.1' : config.nodeBindIp);
 
 async function setStatus(kv: Row, status: string, extra: Record<string, unknown> = {}): Promise<void> {
   const keys = Object.keys(extra);
@@ -90,7 +98,6 @@ async function startContainer(kv: Row, port: number): Promise<string> {
   if (!nets.some((n) => n.Name === network)) await d.createNetwork({ Name: network, Driver: 'bridge', Labels: { 'nav.workspace': kv.workspace_id } });
   await d.getContainer(`nav-kv-${kv.id}`).remove({ force: true }).catch(() => {});
   const plan = KEY_VALUE_PLANS.find((p) => p.id === kv.plan) ?? KEY_VALUE_PLANS[0];
-  const external = (kv.ip_allow_list ?? []).length > 0;
   const container = await d.createContainer({
     name: `nav-kv-${kv.id}`,
     Image: IMAGE,
@@ -98,8 +105,8 @@ async function startContainer(kv: Row, port: number): Promise<string> {
     Labels: { 'nav.keyvalue': kv.id },
     HostConfig: {
       NetworkMode: network,
-      // Reachable from outside only when an allow list is set (enforced by the host firewall/edge in production).
-      PortBindings: { '6379/tcp': [{ HostIp: external ? '0.0.0.0' : config.nodeBindIp, HostPort: String(port) }] },
+      // Private interface only: external clients come in through the TLS proxy.
+      PortBindings: { '6379/tcp': [{ HostIp: config.nodeBindIp, HostPort: String(port) }] },
       Mounts: kv.plan === 'free' ? [] : [{ Type: 'volume', Source: `nav-kv-${kv.id}`, Target: '/data' }],
       Memory: Math.max(64, plan.memoryMB * 1.5) * 1048576,
       NanoCpus: Math.round(plan.cpu * 1e9),
@@ -114,7 +121,54 @@ async function startContainer(kv: Row, port: number): Promise<string> {
   return container.id;
 }
 
+async function stopProxy(id: string): Promise<void> {
+  const p = proxies.get(id);
+  proxies.delete(id);
+  await p?.close();
+}
+
+type TlsColumns = { tls_port: number | null; tls_cert: string | null; tls_fingerprint: string | null };
+
+/**
+ * (Re)starts the TLS proxy with the current allow list for an instance that has one, and stops it for one that
+ * does not. Returns the key_values columns describing it.
+ */
+async function ensureProxy(kv: Row, port: number): Promise<TlsColumns> {
+  await stopProxy(kv.id);
+  const rules = allowRules(kv.ip_allow_list);
+  if (!rules.length) return { tls_port: kv.tls_port ?? null, tls_cert: null, tls_fingerprint: null };
+  const cert = (certificate ??= await loadCertificate());
+  const open = (p: number) => startTlsProxy({ port: p, cert, allow: rules, upstream: { host: upstreamHost(), port }, log: (m, level) => kvLog(kv, m, level) });
+  // Keep the published port across restarts; if something else took it meanwhile, move to a new one.
+  const proxy = await open(kv.tls_port ?? (await freePort())).catch(async (err) => {
+    if (!kv.tls_port) throw err;
+    kvLog(kv, `==> TLS port ${kv.tls_port} is unavailable (${err.message}); moving external access to a new port`, 'warn');
+    return open(await freePort());
+  });
+  proxies.set(kv.id, proxy);
+  kvLog(kv, `==> External access over TLS on port ${proxy.port} (${cert.source === 'platform' ? 'platform certificate' : 'self-signed certificate'})`);
+  return { tls_port: proxy.port, tls_cert: cert.source, tls_fingerprint: cert.fingerprint };
+}
+
+/** Periodically: serve a new or renewed platform certificate (or fall back to self-signed) on running proxies. */
+export async function refreshKvCertificates(ctx: Ctx): Promise<void> {
+  if (!proxies.size) {
+    certificate = null;
+    return;
+  }
+  const next = await loadCertificate();
+  if (certificate?.fingerprint === next.fingerprint) return;
+  certificate = next;
+  for (const p of proxies.values()) p.setCert(next);
+  const rows = await q(
+    'UPDATE key_values SET tls_cert = $2, tls_fingerprint = $3 WHERE id = ANY($1) AND node_id = $4 RETURNING id, workspace_id',
+    [[...proxies.keys()], next.source, next.fingerprint, ctx.nodeId],
+  );
+  for (const r of rows) await changed(r.workspace_id, 'key_value', r.id);
+}
+
 async function stopInstance(ctx: Ctx, kv: Row, remove: boolean): Promise<void> {
+  await stopProxy(kv.id);
   if (ctx.driver.name === 'docker') {
     const d = await docker();
     const c = d.getContainer(`nav-kv-${kv.id}`);
@@ -134,7 +188,8 @@ async function stopInstance(ctx: Ctx, kv: Row, remove: boolean): Promise<void> {
 async function start(ctx: Ctx, kv: Row): Promise<void> {
   const port = kv.port ?? (await freePort());
   const ref = ctx.driver.name === 'docker' ? await startContainer(kv, port) : String(await startProcess(kv, port));
-  await setStatus(kv, 'available', { driver: ctx.driver.name, node_id: ctx.nodeId, ref, host: config.nodeAddress, port });
+  const tlsColumns = await ensureProxy(kv, port);
+  await setStatus(kv, 'available', { driver: ctx.driver.name, node_id: ctx.nodeId, ref, host: config.nodeAddress, port, ...tlsColumns });
 }
 
 export async function handleKvProvision(ctx: Ctx, payload: { keyValueId: string }): Promise<void> {
@@ -172,9 +227,12 @@ export async function handleKvSuspend(ctx: Ctx, payload: { keyValueId: string })
 export async function handleKvResume(ctx: Ctx, payload: { keyValueId: string }): Promise<void> {
   const kv = await one('SELECT * FROM key_values WHERE id = $1', [payload.keyValueId]);
   if (!kv) return;
-  if (ctx.driver.name === 'docker') await (await docker()).getContainer(`nav-kv-${kv.id}`).start().catch(() => {});
-  else await start(ctx, kv);
-  await setStatus(kv, 'available');
+  if (ctx.driver.name === 'docker') {
+    await (await docker()).getContainer(`nav-kv-${kv.id}`).start().catch(() => {});
+    await setStatus(kv, 'available', kv.port ? await ensureProxy(kv, kv.port) : {});
+  } else {
+    await start(ctx, kv);
+  }
 }
 
 export async function handleKvDelete(ctx: Ctx, payload: { keyValueId: string }): Promise<void> {
@@ -186,10 +244,18 @@ export async function handleKvDelete(ctx: Ctx, payload: { keyValueId: string }):
   await changed(kv.workspace_id, 'key_value', kv.id);
 }
 
-/** After an agent restart: process-driver instances that should be running are started again. */
+/**
+ * After an agent restart: process-driver instances that should be running are started again. Docker containers
+ * keep running; only their TLS proxies (which live in the agent) are started again.
+ */
 export async function recoverKeyValues(ctx: Ctx): Promise<void> {
-  if (ctx.driver.name !== 'process') return;
   for (const kv of await q("SELECT * FROM key_values WHERE node_id = $1 AND status = 'available'", [ctx.nodeId])) {
+    if (ctx.driver.name !== 'process') {
+      if (kv.port) {
+        await ensureProxy(kv, kv.port).then((cols) => setStatus(kv, 'available', cols)).catch((err) => kvLog(kv, `==> TLS proxy failed to start: ${err.message}`, 'error'));
+      }
+      continue;
+    }
     if (kv.ref) killTree(Number(kv.ref), true);
     await start(ctx, kv).catch(async (err) => { kvLog(kv, `==> Failed to start: ${err.message}`, 'error'); await setStatus(kv, 'failed'); });
   }

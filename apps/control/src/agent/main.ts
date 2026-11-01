@@ -19,7 +19,7 @@ import { CONTROL_JOBS } from '../scheduler/jobs.ts';
 import { liveNodes } from './cluster.ts';
 import { startShellServer } from './shell.ts';
 import { handleDiskRestore, handleDiskSnapshot } from './snapshots.ts';
-import { handleKvDelete, handleKvProvision, handleKvReconfigure, handleKvResume, handleKvSuspend, recoverKeyValues } from './keyvalue.ts';
+import { handleKvDelete, handleKvProvision, handleKvReconfigure, handleKvResume, handleKvSuspend, recoverKeyValues, refreshKvCertificates } from './keyvalue.ts';
 import { InstanceManager } from './instances.ts';
 import { dockerAvailable, dockerDriver } from './runtime/docker.ts';
 import { processDriver } from './runtime/process.ts';
@@ -196,6 +196,8 @@ async function main() {
   setInterval(() => instances.sample().catch((e) => console.error('[agent] sample', e.message)), 15_000);
   setInterval(() => monitorDatabases(ctx).catch(() => {}), 5_000);
   setInterval(() => monitorHighAvailability(ctx).catch((e) => console.error('[agent] ha monitor', e.message)), 5_000);
+  // Key Value TLS proxies pick up an issued or renewed platform certificate.
+  setInterval(() => refreshKvCertificates(ctx).catch((e) => console.error('[agent] key value certificates', e.message)), 5 * 60_000);
 
   // Job loop: two lanes, each with its own concurrency.
   const running = { work: 0, node: 0 };
