@@ -1,0 +1,6 @@
+/terraform-provider-nav
+/terraform-provider-nav.exe
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
