@@ -14,14 +14,45 @@ import type { Artifact, BuildContext, Driver, ExecSession, Handle, StartSpec, Us
 
 export const DEFAULT_CONTAINER_PORT = 10000;
 
+// Python and Ruby use the full Debian images: they ship gcc and the libpq/libssl headers that packages without a
+// prebuilt wheel or gem (psycopg2, mysqlclient, pg, nokogiri...) need to compile.
 const BASE_IMAGES: Record<string, string> = {
   node: 'node:22-bookworm-slim',
   bun: 'oven/bun:1',
-  python: 'python:3.13-slim',
+  python: 'python:3.13-bookworm',
   go: 'golang:1.25-bookworm',
-  ruby: 'ruby:3.4-slim',
+  ruby: 'ruby:3.4-bookworm',
   static: 'nginx:alpine', // only used for the build stage; static sites are served by the edge
 };
+
+/** Image tag pattern per runtime when the app pins a version (`{v}` is the version). */
+const VERSIONED_IMAGES: Record<string, string> = {
+  node: 'node:{v}-bookworm-slim',
+  python: 'python:{v}-bookworm',
+  ruby: 'ruby:{v}-bookworm',
+};
+
+/**
+ * The language version an app pins: PYTHON_VERSION / NODE_VERSION / RUBY_VERSION env vars, then
+ * .python-version, runtime.txt (python-3.12.1), .nvmrc, .node-version or .ruby-version. Only plain version numbers
+ * (3, 3.12, 3.12.1) are used; anything else falls back to the default image.
+ */
+export async function pinnedVersion(runtime: string, appDir: string, env: Record<string, string>): Promise<string | null> {
+  const sources: Record<string, { env: string; files: string[] }> = {
+    python: { env: 'PYTHON_VERSION', files: ['.python-version', 'runtime.txt'] },
+    node: { env: 'NODE_VERSION', files: ['.nvmrc', '.node-version'] },
+    ruby: { env: 'RUBY_VERSION', files: ['.ruby-version'] },
+  };
+  const s = sources[runtime];
+  if (!s) return null;
+  const candidates: (string | undefined)[] = [env[s.env]];
+  for (const f of s.files) candidates.push(await readFile(path.join(appDir, f), 'utf8').catch(() => undefined));
+  for (const c of candidates) {
+    const v = c?.trim().split(/\r?\n/)[0].trim().replace(/^(python-|ruby-|v)/, '');
+    if (v && /^\d+(\.\d+){0,2}$/.test(v)) return v;
+  }
+  return null;
+}
 
 export async function dockerAvailable(): Promise<boolean> {
   try {
@@ -37,8 +68,8 @@ function shellQuote(s: string): string {
 }
 
 /** Generates a Dockerfile for native runtimes. Env vars are available at build time as ARGs. */
-export function nativeDockerfile(runtime: string, build: string | null, start: string | null, envKeys: string[]): string {
-  const base = BASE_IMAGES[runtime] ?? BASE_IMAGES.node;
+export function nativeDockerfile(runtime: string, build: string | null, start: string | null, envKeys: string[], version: string | null = null): string {
+  const base = version && VERSIONED_IMAGES[runtime] ? VERSIONED_IMAGES[runtime].replace('{v}', version) : BASE_IMAGES[runtime] ?? BASE_IMAGES.node;
   const args = envKeys.filter((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)).map((k) => `ARG ${k}`).join('\n');
   const lines = [
     `FROM ${base}`,
@@ -278,8 +309,9 @@ export function dockerDriver(): Driver {
       if (detected.runtime !== 'docker') {
         contextDir = ctx.appDir;
         dockerfile = '.nav.Dockerfile';
-        extra[dockerfile] = nativeDockerfile(detected.runtime, detected.buildCommand, detected.startCommand, Object.keys(ctx.env));
-        ctx.log(`==> Generated Dockerfile for the ${detected.runtime} runtime`);
+        const version = await pinnedVersion(detected.runtime, ctx.appDir, ctx.env);
+        extra[dockerfile] = nativeDockerfile(detected.runtime, detected.buildCommand, detected.startCommand, Object.keys(ctx.env), version);
+        ctx.log(`==> Generated Dockerfile for the ${detected.runtime} runtime${version ? ` (version ${version})` : ''}`);
       } else {
         contextDir = await insideRepo(ctx.srcDir, path.resolve(ctx.appDir, svc.docker_context || '.'), 'docker context');
         const file = await resolveDockerfile(ctx.srcDir, ctx.appDir, svc.dockerfile_path || 'Dockerfile');
