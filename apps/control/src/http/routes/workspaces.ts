@@ -10,6 +10,7 @@ import { config } from '@nav/shared/config';
 import * as ser from '../../lib/serialize.ts';
 import { lsRemote, validateRepoUrl } from '../../lib/git.ts';
 import { githubAppEnabled, installationRepos, userRepos } from '../../lib/github.ts';
+import { assertPublicUrl } from '../../lib/targets.ts';
 import { requireUser, scoped, workspaceRole } from '../auth.ts';
 import { onChange, openSse } from '../sse.ts';
 import { uniqueSlug, userWorkspaces } from './auth.ts';
@@ -188,6 +189,8 @@ export async function workspaceRoutes(app: FastifyInstance) {
     const { ws } = req.params as { ws: string };
     await workspaceRole(req, ws, 'admin');
     const body = z.object({ webhookUrl: z.string().url().startsWith('https://').nullable(), notifyOn: z.enum(['all', 'failure', 'none']), emailNotifyOn: z.enum(['all', 'failure', 'none']).default('failure') }).parse(req.body);
+    // Checked again (and the connection pinned) at every send: DNS can change after this.
+    if (body.webhookUrl) await assertPublicUrl(body.webhookUrl);
     await q(
       `INSERT INTO notification_settings (workspace_id, webhook_url, notify_on, email_notify_on) VALUES ($1,$2,$3,$4)
        ON CONFLICT (workspace_id) DO UPDATE SET webhook_url = EXCLUDED.webhook_url, notify_on = EXCLUDED.notify_on, email_notify_on = EXCLUDED.email_notify_on`,

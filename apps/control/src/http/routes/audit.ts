@@ -21,7 +21,7 @@ const SINGULAR: Record<string, string> = {
   services: 'service', databases: 'database', 'key-value': 'key_value', 'env-groups': 'env_group', blueprints: 'blueprint', projects: 'project',
   'custom-domains': 'custom_domain', deploys: 'deploy', runs: 'run', environments: 'environment', 'api-keys': 'api_key', members: 'member',
   invites: 'invite', backups: 'backup', 'env-vars': 'env_var', 'secret-files': 'secret_file', workspaces: 'workspace', webhooks: 'webhook', 'log-streams': 'log_stream', snapshots: 'snapshot',
-  orgs: 'org', domains: 'org_domain', saml: 'saml', tokens: 'scim_token', groups: 'scim_group',
+  orgs: 'org', 'org-invites': 'org_invite', domains: 'org_domain', saml: 'saml', tokens: 'scim_token', groups: 'scim_group',
   sandboxes: 'sandbox', 'sandbox-snapshots': 'sandbox_snapshot', files: 'sandbox_file',
 };
 

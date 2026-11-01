@@ -6,6 +6,7 @@ import {
   useMfaEnable, useMfaSetup, useRegenerateRecoveryCodes, useRevokeSession, useSessions, useUpdateProfile,
 } from '@/api/auth';
 import { errorMessage } from '@/api/client';
+import { useMyOrgInvites, useRespondOrgInvite } from '@/api/orgs';
 import type { AuthProvider, SessionInfo } from '@/api/types';
 import { RelativeTime } from '@/components/RelativeTime';
 import { Button, CopyField, Dialog, Switch, useConfirm, useToast } from '@/components/ui';
@@ -553,6 +554,37 @@ function NotificationsSection() {
   );
 }
 
+/** Organization invitations addressed to this account; shown only when there are some. */
+function OrgInvitesSection() {
+  const invites = useMyOrgInvites();
+  const respond = useRespondOrgInvite();
+  const toast = useToast();
+  const items = invites.data?.items ?? [];
+  if (!items.length) return null;
+  return (
+    <Section id="org-invites" title="Organization invitations">
+      {items.map((i) => (
+        <Row key={i.id} label={i.orgName} hint={`Invited as ${i.role}. Org owners and admins can manage the organization's workspaces and its members' access.`}>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              variant="primary"
+              loading={respond.isPending && respond.variables?.id === i.id && respond.variables.accept}
+              onClick={() => respond.mutate({ id: i.id, accept: true }, { onSuccess: () => toast.success(`Joined ${i.orgName}`), onError: (err) => toast.error('Could not accept', errorMessage(err)) })}
+            >
+              Accept
+            </Button>
+            <Button
+              onClick={() => respond.mutate({ id: i.id, accept: false }, { onSuccess: () => toast.success('Invitation declined'), onError: (err) => toast.error('Could not decline', errorMessage(err)) })}
+            >
+              Decline
+            </Button>
+          </div>
+        </Row>
+      ))}
+    </Section>
+  );
+}
+
 function ConnectionsSection() {
   const identities = useIdentities();
   const disconnect = useDisconnectIdentity();
@@ -707,6 +739,7 @@ export function AccountSettingsPage() {
       )}
       <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px]">
         <div className="space-y-10">
+          <OrgInvitesSection />
           <ProfileSection />
           <AppearanceSection />
           <SecuritySection />

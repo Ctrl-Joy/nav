@@ -713,7 +713,8 @@ nav sandbox rm sbx_123`,
         type: 'list',
         items: [
           "On the Docker driver each sandbox is its own container: all capabilities dropped, `no-new-privileges`, a read-only root filesystem with a writable `/workspace` volume (plus small tmpfs mounts for `/tmp` and `$HOME`), and the plan's memory, CPU and process limits.",
-          "Sandboxes have no network unless created with `networkAccess: 'egress'`; egress sandboxes share a bridge where they cannot reach each other, and never join a workspace's private network.",
+          "Sandboxes have no network unless created with `networkAccess: 'egress'`; egress sandboxes share a bridge where they cannot reach each other, and never join a workspace's private network. Where the agent can manage the host firewall, egress sandboxes cannot reach private networks or the node either (`egressFiltered` in the API; see Security).",
+          "Images are always pulled from their registry and run by digest: the defaults for each runtime, plus repositories the operator allows with `NAV_SANDBOX_IMAGES`.",
           "Only the environment variables you pass reach the sandbox. Platform settings, secrets and the master key are never given to it, and env values are not stored by the control plane.",
           "The process driver (used in development when Docker is not available) is NOT isolated: commands are ordinary processes on the node, in a dedicated directory with a scrubbed environment, killed as a whole process tree on timeout or delete. Agents refuse to run sandboxes on the process driver in production unless `NAV_ALLOW_UNISOLATED_SANDBOXES=1`.",
         ],
@@ -736,7 +737,7 @@ nav sandbox rm sbx_123`,
       },
       {
         type: 'p',
-        text: "Every command is recorded in the workspace audit log as `sandbox.exec` with the command and its exit code. Output is never logged.",
+        text: "Every command is recorded in the workspace audit log as `sandbox.exec` with the command and its exit code; obvious inline secrets (password and token flags, `*_TOKEN=` style assignments, bearer tokens, passwords in URLs) are replaced with `[REDACTED]`. Output is never logged.",
       },
     ],
   },
@@ -924,10 +925,20 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
         type: 'p',
         text: "With the Docker driver every instance gets the plan's memory and CPU limits, a 512-process limit, all Linux capabilities dropped except the few a typical app needs, no-new-privileges, a private /tmp, no Docker socket, and its workspace's own network. Platform secrets are never passed in. Instance ports are published only on the node's private address; the edge is the only public way in.",
       },
+      { type: 'h3', text: 'Sandbox and app egress', id: 'sandbox-egress' },
+      {
+        type: 'p',
+        text: "Docker alone lets a container with network access reach everything its node can: the node's private network, the cloud metadata service and the node itself. On Linux, when the agent runs as root or with `CAP_NET_ADMIN`, it installs host firewall rules at start (idempotently, in its own `NAV-SANDBOX-EGRESS` and `NAV-SANDBOX-INPUT` chains, jumped to from `DOCKER-USER` and `INPUT`): traffic from the `nav-sandbox-egress` bridge to 10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 127/8 and the node's own addresses is dropped, while DNS to the node's resolvers keeps working. App networks are kept away from link-local addresses (169.254/16, the cloud metadata service). When the rules cannot be applied (another OS, a rootless agent, no iptables) the agent logs it clearly, and sandboxes report `egressFiltered: false` in the API; sandboxes without network access always report `true` on the Docker driver. Sandbox images are always pulled from their registry and run by the digest the pull returned, never taken from the node's image cache: only the platform's default images and repositories an operator allows with `NAV_SANDBOX_IMAGES` (comma-separated prefixes such as `python,ghcr.io/acme/`) are accepted, and NAV build images (`nav/...`) or bare image IDs never are.",
+      },
+      { type: 'h3', text: 'Pull request previews from forks', id: 'fork-previews' },
+      {
+        type: 'p',
+        text: "A pull request from a fork runs code written by someone outside your team, so it never gets an automatic preview. A maintainer can opt a fork pull request in by adding the `nav-preview` label (only people with triage or write access can label); each new commit needs the label again. Even then the preview starts with an empty environment: it gets NAV's own `NAV_*` variables but none of the parent's environment variables, secret files or env groups, and preview services never receive `NAV_WORKFLOWS_TOKEN`. Skipped fork pull requests are recorded in the workspace events.",
+      },
       { type: 'h3', text: 'Verified webhooks', id: 'verified-webhooks' },
       {
         type: 'p',
-        text: "Incoming GitHub webhooks are checked with HMAC SHA-256 in constant time before anything runs. Outgoing NAV webhooks are signed following the Standard Webhooks spec: verify `webhook-signature` as an HMAC SHA-256 of `<webhook-id>.<webhook-timestamp>.<body>` with your endpoint's `whsec_` secret, and reject old timestamps. Webhook and log-stream targets must be public addresses in production.",
+        text: "Incoming GitHub webhooks are checked with HMAC SHA-256 in constant time before anything runs. Outgoing NAV webhooks are signed following the Standard Webhooks spec: verify `webhook-signature` as an HMAC SHA-256 of `<webhook-id>.<webhook-timestamp>.<body>` with your endpoint's `whsec_` secret, and reject old timestamps. Webhook, notification and log-stream targets must be public addresses in production: every address a name resolves to is checked (IPv6 spellings of private IPv4 addresses included), the connection is pinned to the checked address so DNS rebinding cannot redirect it, and redirects are not followed. The workspace notification webhook is signed in `x-nav-signature` with a key derived from the master key, never the master key itself.",
       },
       {
         type: 'h3',
@@ -952,7 +963,7 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
       },
       {
         type: 'p',
-        text: "Instance administrators are the accounts whose email is listed in `NAV_ADMIN_EMAILS` (comma-separated). That address must be verified, either by signing in with a provider or by using a password reset link, which is written to the control plane log when no SMTP server is set. Without `NAV_ADMIN_EMAILS`, the first account created on the server is the administrator.",
+        text: "Instance administrators are the accounts whose email is listed in `NAV_ADMIN_EMAILS` (comma-separated). That address must be verified, either by signing in with a provider or by using a password reset link, which is written to the control plane log when no SMTP server is set. Without `NAV_ADMIN_EMAILS`, the first account created on the server is the administrator, outside production only: in production (`NODE_ENV=production`) there is no administrator until `NAV_ADMIN_EMAILS` is set, and the control plane warns at start when it is missing.",
       },
       {
         type: 'p',

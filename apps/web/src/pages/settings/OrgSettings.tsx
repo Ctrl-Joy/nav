@@ -5,7 +5,7 @@ import { isApiError } from '@/api/client';
 import { useMe } from '@/api/auth';
 import {
   useAddOrgDomain, useAddOrgMember, useAttachWorkspace, useCreateOrgWorkspace, useCreateScimToken, useDeleteOrgDomain, useDeleteOrgSaml, useDetachWorkspace,
-  useMapScimGroup, useOrg, useOrgAuditLogs, useOrgDomains, useOrgMembers, useOrgSaml, useOrgScim, useOrgWorkspaces, useRemoveOrgMember, useRevokeScimToken,
+  useMapScimGroup, useOrg, useOrgAuditLogs, useOrgDomains, useOrgMembers, useOrgSaml, useOrgScim, useOrgWorkspaces, useRemoveOrgMember, useRevokeOrgInvite, useRevokeScimToken,
   useUpdateOrg, useUpdateOrgMember, useUpdateOrgSaml, useVerifyOrgDomain,
 } from '@/api/orgs';
 import type { OrgDetail, OrgRole, SamlSettings } from '@/api/types';
@@ -128,6 +128,7 @@ function MembersSection({ org, isAdmin, isOwner }: { org: OrgDetail; isAdmin: bo
   const { user } = useWorkspace();
   const members = useOrgMembers(org.id);
   const add = useAddOrgMember(org.id);
+  const revoke = useRevokeOrgInvite(org.id);
   const update = useUpdateOrgMember(org.id);
   const remove = useRemoveOrgMember(org.id);
   const toast = useToast();
@@ -140,12 +141,13 @@ function MembersSection({ org, isAdmin, isOwner }: { org: OrgDetail; isAdmin: bo
     e.preventDefault();
     try {
       await add.mutateAsync({ email: email.trim(), role });
-      toast.success('Member added', email.trim());
+      toast.success('Invitation sent', `${email.trim()} joins after accepting it.`);
       setEmail('');
     } catch (err) {
-      toast.fromError(err, 'Could not add member');
+      toast.fromError(err, 'Could not send the invitation');
     }
   };
+  const invites = members.data?.invites ?? [];
 
   return (
     <Section id="members" title="Members" description="Org owners and admins can manage every workspace in the organization. Members only see the workspaces they belong to.">
@@ -158,9 +160,28 @@ function MembersSection({ org, isAdmin, isOwner }: { org: OrgDetail; isAdmin: bo
             {(id) => <Select id={id} value={role} onChange={(e) => setRole(e.target.value as OrgRole)} options={ORG_ROLES.filter((r) => r.value !== 'owner' || isOwner)} />}
           </Field>
           <Button type="submit" variant="primary" icon={<UserPlus className="size-4" />} loading={add.isPending} disabled={!/^\S+@\S+\.\S+$/.test(email.trim())}>
-            Add
+            Invite
           </Button>
         </form>
+      )}
+      {isAdmin && invites.length > 0 && (
+        <div className="mb-6">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-subtle">Pending invitations</div>
+          <ul className="divide-y divide-border border border-border">
+            {invites.map((i) => (
+              <li key={i.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <span className="flex-1 truncate">{i.email}</span>
+                <Badge className="capitalize">{i.role}</Badge>
+                <span className="hidden text-xs text-fg-subtle sm:inline">expires <RelativeTime value={i.expiresAt} /></span>
+                <IconButton
+                  label={`Revoke the invitation for ${i.email}`}
+                  icon={<Trash2 className="size-4" />}
+                  onClick={() => revoke.mutate(i.id, { onSuccess: () => toast.success('Invitation revoked'), onError: (err) => toast.fromError(err, 'Could not revoke the invitation') })}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {members.isPending ? (
         <SkeletonRows rows={3} />

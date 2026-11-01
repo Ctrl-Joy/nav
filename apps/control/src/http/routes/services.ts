@@ -8,7 +8,7 @@ import { badRequest, changed, conflict, enqueue, notFound, recordEvent } from '.
 import * as ser from '../../lib/serialize.ts';
 import { cancelDeploy, createDeploy, serviceOp } from '../../lib/deploys.ts';
 import { listEnv, listFiles, patchEnv, replaceEnv, replaceFiles } from '../../lib/env.ts';
-import { createPreview, createService, markForDeletion, validateCron, validateDisk, validatePlan } from '../../lib/services.ts';
+import { createPreview, createService, markForDeletion, repoPathError, validateCron, validateDisk, validatePlan } from '../../lib/services.ts';
 import { validateRepoUrl } from '../../lib/git.ts';
 import { wakeService } from '../../lib/sleep.ts';
 import { atLeast, requireUser, scoped, workspaceRole } from '../auth.ts';
@@ -19,6 +19,8 @@ const EnvVar = z.object({ key: z.string().min(1).max(256), value: z.string().max
 const SecretFile = z.object({ filename: z.string().min(1).max(128), content: z.string().max(524288) });
 const Disk = z.object({ name: z.string().min(1).max(64), mountPath: z.string().min(1).max(256), sizeGB: z.number().int().min(1).max(1024) });
 const Cmd = z.string().max(4096).nullable().optional();
+// Dockerfile path / Docker context: relative to the repository, never absolute or climbing out with "..".
+const RepoPath = z.string().max(255).superRefine((p, ctx) => { const err = repoPathError(p); if (err) ctx.addIssue({ code: 'custom', message: err }); });
 const Previews = z.object({ mode: z.enum(['off', 'manual', 'automatic']), expireAfterDays: z.number().int().min(1).max(90) });
 
 const CreateService = z.object({
@@ -33,8 +35,8 @@ const CreateService = z.object({
   buildCommand: Cmd,
   startCommand: Cmd,
   preDeployCommand: Cmd,
-  dockerfilePath: z.string().max(255).optional(),
-  dockerContext: z.string().max(255).optional(),
+  dockerfilePath: RepoPath.optional(),
+  dockerContext: RepoPath.optional(),
   publishPath: z.string().max(255).nullable().optional(),
   healthCheckPath: z.string().max(255).nullable().optional(),
   port: z.number().int().nullable().optional(),

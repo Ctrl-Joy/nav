@@ -7,16 +7,18 @@ import { changed, enqueue, recordEvent } from './core.ts';
 import { deleteResources, type TrackedResource } from './blueprints.ts';
 import { githubAppEnabled, previewCommentBody, upsertPrComment, type PreviewCommentRow } from './github.ts';
 
-export interface PullRequestRef { number: number; title: string | null; headRef: string; headSha: string | null }
+/** `untrusted`: the PR comes from a fork; its copies get no values from the blueprint's own services. */
+export interface PullRequestRef { number: number; title: string | null; headRef: string; headSha: string | null; untrusted?: boolean }
 
 /** Creates (or refreshes at a new head) the preview environment of a blueprint for a PR; the agent builds it. */
 export async function requestPreviewEnvironment(bp: Row, pr: PullRequestRef): Promise<Row> {
+  // Once untrusted, always untrusted (OR on conflict): a fork never inherits an environment made for trusted code.
   const env = (await one(
-    `INSERT INTO preview_environments (id, blueprint_id, workspace_id, pr_number, pr_title, branch, commit_sha) VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO preview_environments (id, blueprint_id, workspace_id, pr_number, pr_title, branch, commit_sha, untrusted) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (blueprint_id, pr_number) DO UPDATE SET pr_title = EXCLUDED.pr_title, branch = EXCLUDED.branch, commit_sha = EXCLUDED.commit_sha,
-       status = 'creating', error = NULL, updated_at = now()
+       untrusted = preview_environments.untrusted OR EXCLUDED.untrusted, status = 'creating', error = NULL, updated_at = now()
      RETURNING *`,
-    [id('bpv'), bp.id, bp.workspace_id, pr.number, pr.title?.slice(0, 300) ?? null, pr.headRef, pr.headSha],
+    [id('bpv'), bp.id, bp.workspace_id, pr.number, pr.title?.slice(0, 300) ?? null, pr.headRef, pr.headSha, !!pr.untrusted],
   ))!;
   await enqueue('blueprint_preview', { previewId: env.id }, { concurrencyKey: `bpv:${env.id}` });
   await recordEvent({ workspaceId: bp.workspace_id, kind: 'preview_environment_requested', data: { blueprintId: bp.id, previewId: env.id, prNumber: pr.number } });

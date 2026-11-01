@@ -19,6 +19,12 @@ export function sandboxManagerFor(driverName: 'process' | 'docker'): SandboxMana
  * After an agent restart: containers that are still running are adopted; process sandboxes died with the agent
  * and are marked failed. Leftover files and containers of anything else are removed.
  */
+/** Driver setup at agent start (docker: the egress network and its host firewall rules). Never throws. */
+export async function prepareSandboxes(mgr: SandboxManager): Promise<void> {
+  if (mgr.disabledReason) return;
+  await mgr.driver.prepare?.().catch((err) => console.error('[agent] sandbox setup', (err as Error).message));
+}
+
 export async function recoverSandboxes(mgr: SandboxManager, nodeId: string): Promise<void> {
   const rows = await q("SELECT id FROM sandboxes WHERE node_id = $1 AND status IN ('starting','running','stopping')", [nodeId]);
   const keep = new Set<string>();

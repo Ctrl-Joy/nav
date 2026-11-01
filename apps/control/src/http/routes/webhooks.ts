@@ -2,7 +2,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { one, q } from '../../db/pool.ts';
-import { HttpError, enqueue, notFound } from '../../lib/core.ts';
+import { HttpError, enqueue, notFound, recordEvent } from '../../lib/core.ts';
 import * as ser from '../../lib/serialize.ts';
 import { createDeploy } from '../../lib/deploys.ts';
 import { createPreview, markForDeletion } from '../../lib/services.ts';
@@ -12,6 +12,13 @@ import { awaitChecks, eventVerdict, onChecksEvent } from '../../lib/checks.ts';
 import { deletePreviewEnvironment, requestPreviewEnvironment } from '../../lib/previews.ts';
 
 const norm = (url: string) => url.toLowerCase().replace(/\.git$/, '').replace(/\/$/, '');
+
+/** A pull request whose head lives in another repository (a fork), or whose head repository was deleted. */
+export function isForkPullRequest(pr: { head?: { repo?: { full_name?: string } | null }; base?: { repo?: { full_name?: string } | null } }): boolean {
+  const head = pr.head?.repo?.full_name?.toLowerCase();
+  const base = pr.base?.repo?.full_name?.toLowerCase();
+  return !head || !base || head !== base;
+}
 
 export async function webhookRoutes(app: FastifyInstance) {
   app.post('/webhooks/github', { config: { rateLimit: { max: 600, timeWindow: '1 minute' } } }, async (req, reply) => {
@@ -73,16 +80,33 @@ export async function webhookRoutes(app: FastifyInstance) {
     if (event === 'pull_request' && repoUrl) {
       const pr = body.pull_request;
       const base = pr.base.ref;
+      const fork = isForkPullRequest(pr);
+      const labeled = (pr.labels ?? []).some((l: any) => l.name === 'nav-preview');
+      // A fork's code is written by someone outside the team: it only ever deploys when a maintainer adds the
+      // nav-preview label (only collaborators with triage or write access can label), once per labeling, so every
+      // new commit needs a fresh look. Even then the preview gets no secrets (see createPreview).
+      const maintainerLabeled = body.action === 'labeled' && body.label?.name === 'nav-preview';
+      const forkSkipped = async (workspaceId: string, serviceId: string | null, data: Record<string, unknown>) => {
+        if (!['opened', 'reopened', 'synchronize'].includes(body.action)) return;
+        await recordEvent({
+          workspaceId, serviceId, kind: 'preview_skipped',
+          data: { ...data, prNumber: pr.number, headRepo: pr.head?.repo?.full_name ?? null, reason: 'pull requests from forks are previewed only when a maintainer adds the nav-preview label (each new commit needs the label again); fork previews never receive the parent\'s environment variables or secret files' },
+        });
+      };
       const parents = await q("SELECT * FROM services WHERE lower(regexp_replace(repo_url, '\\.git$', '')) = $1 AND branch = $2 AND parent_service_id IS NULL AND previews->>'mode' <> 'off' AND status <> 'deleting'", [repoUrl, base]);
       for (const parent of parents) {
-        if (['opened', 'reopened', 'synchronize'].includes(body.action)) {
+        if (['opened', 'reopened', 'synchronize', 'labeled'].includes(body.action)) {
           const automatic = parent.previews.mode === 'automatic';
-          const labeled = (pr.labels ?? []).some((l: any) => l.name === 'nav-preview');
           const exists = await one('SELECT 1 FROM services WHERE parent_service_id = $1 AND pr_number = $2', [parent.id, pr.number]);
-          if (!automatic && !labeled && !exists) continue;
+          if (fork) {
+            if (!maintainerLabeled) { await forkSkipped(parent.workspace_id, parent.id, { parentServiceId: parent.id }); continue; }
+          } else {
+            if (body.action === 'labeled' && (!maintainerLabeled || exists)) continue;
+            if (!automatic && !labeled && !exists) continue;
+          }
           if (/\[(skip preview|preview skip)\]/i.test(pr.title ?? '')) continue;
           // The PR comment (one per preview, kept up to date) is written by the notifier from the deploy events.
-          await createPreview(parent, pr.head.ref, pr.number, null, pr.head.sha);
+          await createPreview(parent, pr.head.ref, pr.number, null, pr.head.sha, { untrusted: fork });
         } else if (body.action === 'closed') {
           const previews = await q("SELECT * FROM services WHERE parent_service_id = $1 AND pr_number = $2 AND status <> 'deleting'", [parent.id, pr.number]);
           for (const p of previews) await markForDeletion(p, null);
@@ -94,11 +118,14 @@ export async function webhookRoutes(app: FastifyInstance) {
       for (const bp of bps) {
         const env = await one('SELECT * FROM preview_environments WHERE blueprint_id = $1 AND pr_number = $2', [bp.id, pr.number]);
         if (['opened', 'reopened', 'synchronize', 'labeled'].includes(body.action)) {
-          const labeled = (pr.labels ?? []).some((l: any) => l.name === 'nav-preview');
-          if (bp.previews.generation !== 'automatic' && !labeled && !env) continue;
-          if (body.action === 'labeled' && env) continue;
+          if (fork) {
+            if (!maintainerLabeled) { await forkSkipped(bp.workspace_id, null, { blueprintId: bp.id }); continue; }
+          } else {
+            if (bp.previews.generation !== 'automatic' && !labeled && !env) continue;
+            if (body.action === 'labeled' && (!maintainerLabeled || env)) continue;
+          }
           if (/\[(skip preview|preview skip)\]/i.test(pr.title ?? '')) continue;
-          await requestPreviewEnvironment(bp, { number: pr.number, title: pr.title ?? null, headRef: pr.head.ref, headSha: pr.head.sha ?? null });
+          await requestPreviewEnvironment(bp, { number: pr.number, title: pr.title ?? null, headRef: pr.head.ref, headSha: pr.head.sha ?? null, untrusted: fork });
         } else if (body.action === 'closed' && env) {
           await deletePreviewEnvironment(env, null);
         }

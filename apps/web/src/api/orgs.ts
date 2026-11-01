@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { qk } from './keys';
-import type { AuditLogEntry, OrgDetail, OrgDomain, OrgMember, OrgRole, OrgWorkspace, SamlSettings, SamlUpdate, ScimSettings } from './types';
+import type { AuditLogEntry, MyOrgInvite, OrgDetail, OrgDomain, OrgInvite, OrgMember, OrgRole, OrgWorkspace, SamlSettings, SamlUpdate, ScimSettings } from './types';
 
 // Organizations ------------------------------------------------------------------------------
 
@@ -31,14 +31,39 @@ export function useUpdateOrg(org: string) {
 // Members ------------------------------------------------------------------------------------
 
 export function useOrgMembers(org: string) {
-  return useQuery({ queryKey: qk.orgMembers(org), queryFn: () => api.get<{ items: OrgMember[] }>(`/orgs/${org}/members`) });
+  return useQuery({ queryKey: qk.orgMembers(org), queryFn: () => api.get<{ items: OrgMember[]; invites?: OrgInvite[] }>(`/orgs/${org}/members`) });
 }
 
+/** Sends an invitation: people join an organization only by accepting it. */
 export function useAddOrgMember(org: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { email: string; role: OrgRole }) => api.post(`/orgs/${org}/members`, body),
+    mutationFn: (body: { email: string; role: OrgRole }) => api.post<{ invite: OrgInvite }>(`/orgs/${org}/members`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.orgMembers(org) }),
+  });
+}
+
+export function useRevokeOrgInvite(org: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => api.del(`/orgs/${org}/invites/${inviteId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.orgMembers(org) }),
+  });
+}
+
+/** Invitations addressed to the signed-in user. */
+export function useMyOrgInvites() {
+  return useQuery({ queryKey: qk.myOrgInvites, queryFn: () => api.get<{ items: MyOrgInvite[]; emailVerified: boolean }>('/org-invites') });
+}
+
+export function useRespondOrgInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, accept }: { id: string; accept: boolean }) => api.post(`/org-invites/${id}/${accept ? 'accept' : 'decline'}`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.myOrgInvites });
+      qc.invalidateQueries({ queryKey: qk.me });
+    },
   });
 }
 

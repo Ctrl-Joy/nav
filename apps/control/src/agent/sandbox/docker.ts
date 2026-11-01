@@ -9,6 +9,8 @@ import Docker from 'dockerode';
 import tar from 'tar-stream';
 import type { SandboxFileEntry } from '@nav/shared';
 import { SANDBOX_LIMITS } from '@nav/shared';
+import { forbiddenImageReason, imageRepository } from '../../lib/sandboxImages.ts';
+import { applyEgressFirewall } from './firewall.ts';
 import { PathError, WORKSPACE_MOUNT, containerPath, sandboxSegments } from './paths.ts';
 import type { SandboxBox, SandboxDriver, SandboxProcess, SandboxSpec, StartOptions } from './types.ts';
 
@@ -173,16 +175,6 @@ export function stripTarPrefix(src: Readable, prefix: string): Readable {
   return pack as unknown as Readable;
 }
 
-async function followProgress(docker: Docker, stream: NodeJS.ReadableStream): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    docker.modem.followProgress(stream, (err: Error | null, res: { error?: string }[]) => {
-      if (err) return reject(err);
-      const failed = res.find((r) => r.error);
-      return failed ? reject(new Error(failed.error)) : resolve();
-    });
-  });
-}
-
 /** Runs a helper command in the container and collects its output. */
 async function run(docker: Docker, container: Docker.Container, cmd: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const exec = await container.exec({ Cmd: cmd, AttachStdout: true, AttachStderr: true, Tty: false });
@@ -339,25 +331,55 @@ class DockerBox implements SandboxBox {
   }
 }
 
-export function dockerSandboxDriver(docker = new Docker()): SandboxDriver {
-  async function ensureImage(image: string): Promise<void> {
-    if (await docker.getImage(image).inspect().catch(() => null)) return;
-    await followProgress(docker, await docker.pull(image));
-  }
+/**
+ * Pulls a sandbox image from its registry, anonymously, and returns the reference pinned to the digest the pull
+ * reported (repo@sha256:...). The node's local image cache is never used as a fallback: it also holds other
+ * tenants' builds, and a tag there may have been made locally.
+ */
+export async function pullSandboxImage(docker: Pick<Docker, 'pull' | 'modem'>, image: string): Promise<string> {
+  const forbidden = forbiddenImageReason(image);
+  if (forbidden) throw new Error(forbidden);
+  const stream = await docker.pull(image, {});
+  const events = await new Promise<{ status?: string; error?: string }[]>((resolve, reject) => {
+    docker.modem.followProgress(stream, (err: Error | null, res: { status?: string; error?: string }[]) => (err ? reject(err) : resolve(res ?? [])));
+  });
+  const failed = events.find((e) => e.error);
+  if (failed) throw new Error(`could not pull ${image}: ${failed.error}`);
+  const digest = events.map((e) => /^Digest: (sha256:[0-9a-f]{64})$/.exec(e.status ?? '')?.[1]).find(Boolean)
+    ?? /@(sha256:[0-9a-f]{64})$/.exec(image)?.[1];
+  if (!digest) throw new Error(`the registry did not report a digest for ${image}`);
+  return `${imageRepository(image)}@${digest}`;
+}
 
+export function dockerSandboxDriver(docker = new Docker()): SandboxDriver {
+  let egressFiltered = false;
+
+  /** Creates the egress network if needed and (re)applies the host firewall rules for its subnet. */
   async function ensureEgressNetwork(): Promise<void> {
     const nets = await docker.listNetworks({ filters: { name: [SANDBOX_EGRESS_NETWORK] } });
-    if (!nets.some((n) => n.Name === SANDBOX_EGRESS_NETWORK)) await docker.createNetwork(egressNetworkSpec()).catch(() => {});
+    let net = nets.find((n) => n.Name === SANDBOX_EGRESS_NETWORK);
+    if (!net) {
+      await docker.createNetwork(egressNetworkSpec()).catch(() => {});
+      net = await docker.getNetwork(SANDBOX_EGRESS_NETWORK).inspect().catch(() => undefined);
+    }
+    if (egressFiltered) return;
+    const subnet = net?.IPAM?.Config?.find((c: { Subnet?: string }) => c.Subnet && !c.Subnet.includes(':'))?.Subnet;
+    if (!subnet) return console.warn('[agent] sandbox egress filtering NOT applied: the egress network has no IPv4 subnet');
+    egressFiltered = await applyEgressFirewall(subnet);
   }
 
   return {
     name: 'docker',
     isolated: true,
+    get egressFiltered() { return egressFiltered; },
+    async prepare() {
+      await ensureEgressNetwork();
+    },
     async create(spec) {
-      await ensureImage(spec.image);
+      const image = await pullSandboxImage(docker, spec.image);
       if (spec.networkAccess === 'egress') await ensureEgressNetwork();
       await docker.getContainer(containerName(spec.id)).remove({ force: true, v: true }).catch(() => {});
-      const container = await docker.createContainer(sandboxContainerSpec(spec));
+      const container = await docker.createContainer(sandboxContainerSpec({ ...spec, image }));
       try {
         await container.start();
       } catch (err) {

@@ -7,7 +7,7 @@ import { config } from '@nav/shared/config';
 import { decrypt } from '@nav/shared/crypto';
 import { listen, one, q, type Row } from '../db/pool.ts';
 import { layout, sendMail } from '../lib/mail.ts';
-import { assertPublicUrl } from '../lib/targets.ts';
+import { publicFetch } from '../lib/targets.ts';
 import { syncPreviewComment } from '../lib/previews.ts';
 
 const OUTCOMES: Record<string, 'success' | 'failure'> = { deploy_live: 'success', deploy_failed: 'failure', database_failed: 'failure', cron_failed: 'failure', instance_crashed: 'failure' };
@@ -45,8 +45,22 @@ async function slack(e: Row, outcome: 'success' | 'failure'): Promise<void> {
   if (!n?.webhook_url || n.notify_on === 'none' || (n.notify_on === 'failure' && outcome !== 'failure')) return;
   const text = `${outcome === 'success' ? '✅' : '❌'} NAV: ${e.service_name ?? 'resource'} — ${e.kind.replace(/_/g, ' ')}${e.data?.error ? `: ${e.data.error}` : ''}`;
   const body = JSON.stringify({ text, content: text, event: e.kind, serviceId: e.service_id, data: e.data, createdAt: e.created_at, dashboard: config.dashboardUrl });
-  const sig = createHmac('sha256', process.env.NAV_MASTER_KEY!).update(body).digest('hex');
-  await fetch(n.webhook_url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-nav-signature': `sha256=${sig}` }, body, signal: AbortSignal.timeout(10_000) }).catch(() => {});
+  const res = await publicFetch(n.webhook_url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-nav-signature': slackSignature(body) },
+    body,
+    signal: AbortSignal.timeout(10_000),
+  }).catch((err: Error) => { console.error(`[notifier] slack webhook of ${e.workspace_id}: ${err.message}`); return null; });
+  await res?.body?.cancel().catch(() => {});
+}
+
+/**
+ * x-nav-signature of the workspace notification webhook: HMAC-SHA256 of the body under a key derived from the
+ * master key for this purpose only (the master key itself never signs anything a third party sees).
+ */
+export function slackSignature(body: string, master = process.env.NAV_MASTER_KEY!): string {
+  const key = createHmac('sha256', master).update('nav:slack-webhook:v1').digest();
+  return `sha256=${createHmac('sha256', key).update(body).digest('hex')}`;
 }
 
 async function email(e: Row, outcome: 'success' | 'failure'): Promise<void> {
@@ -88,10 +102,8 @@ export async function deliver(d: Row): Promise<void> {
   let code: number | null = null;
   let error: string | null = null;
   try {
-    await assertPublicUrl(hook.url);
-    const res = await fetch(hook.url, {
+    const res = await publicFetch(hook.url, {
       method: 'POST',
-      redirect: 'manual',
       headers: { 'content-type': 'application/json', 'user-agent': 'NAV-Webhooks/1.0', 'webhook-id': msgId, 'webhook-timestamp': String(ts), 'webhook-signature': sign(decrypt(hook.secret_enc), msgId, ts, body) },
       body,
       signal: AbortSignal.timeout(15_000),

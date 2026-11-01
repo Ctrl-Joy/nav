@@ -93,7 +93,7 @@ export class SandboxManager {
     return e;
   }
 
-  async create(spec: SandboxSpec, snapshot: StoredArtifact | null): Promise<{ ref: string; driver: string; isolated: boolean }> {
+  async create(spec: SandboxSpec, snapshot: StoredArtifact | null): Promise<{ ref: string; driver: string; isolated: boolean; egressFiltered: boolean }> {
     if (this.disabledReason) throw new SandboxError(503, this.disabledReason);
     if (this.boxes.has(spec.id) || this.creating.has(spec.id)) throw new SandboxError(409, 'sandbox already exists on this node');
     this.creating.add(spec.id);
@@ -106,7 +106,9 @@ export class SandboxManager {
         throw err;
       }
       this.boxes.set(spec.id, { box, procs: new Set(), destroying: false });
-      return { ref: box.ref, driver: this.driver.name, isolated: this.driver.isolated };
+      // No network at all counts as filtered, but only where the driver actually isolates the sandbox.
+      const egressFiltered = this.driver.isolated && (spec.networkAccess === 'none' || this.driver.egressFiltered);
+      return { ref: box.ref, driver: this.driver.name, isolated: this.driver.isolated, egressFiltered };
     } finally {
       this.creating.delete(spec.id);
     }

@@ -6,7 +6,7 @@ import { id } from '@nav/shared/ids';
 import { one, q, tx, type Row } from '../db/pool.ts';
 import { changed } from '../lib/core.ts';
 import {
-  MAX_DEPTH, MAX_STEPS_PER_RUN, afterTerminal, attemptFailed, enqueueRun, parseDescribe, stepsResolved, type DiscoveredTask,
+  MAX_DEPTH, MAX_STEPS_PER_RUN, RunLimitError, afterTerminal, assertRunCapacity, attemptFailed, enqueueRun, parseDescribe, stepsResolved, type DiscoveredTask,
 } from '../lib/workflows.ts';
 import { startOneOff, type Ctx } from './handlers.ts';
 import type { Artifact } from './runtime/types.ts';
@@ -90,7 +90,7 @@ async function journal(runId: string): Promise<object[]> {
 }
 
 /** Records the steps a suspended execution asked for: child runs and sleeps. The run waits for them. */
-async function suspend(run: Row, svc: Row, steps: any[], log: Log): Promise<void> {
+export async function suspend(run: Row, svc: Row, steps: any[], log: Log): Promise<void> {
   if (!Array.isArray(steps)) return void (await attemptFailed(run, 'the SDK reported an invalid suspension', false));
   const existing = await q('SELECT seq FROM workflow_steps WHERE run_id = $1', [run.id]);
   const known = new Set(existing.map((s) => s.seq));
@@ -100,9 +100,17 @@ async function suspend(run: Row, svc: Row, steps: any[], log: Log): Promise<void
   const defs = new Map((await q('SELECT * FROM workflow_tasks WHERE deploy_id = $1', [run.deploy_id])).map((t) => [t.name, t]));
   const sleeps: number[] = [];
   const children: string[] = [];
-  const ok = await tx(async (c) => {
+  const ok = await tx(async (c): Promise<boolean | string> => {
     const cur = await c.query('SELECT status FROM workflow_runs WHERE id = $1 FOR UPDATE', [run.id]);
     if (cur.rows[0]?.status !== 'running') return false;
+    // New subtasks count against the workflow's and workspace's active-run limits (fan-out cannot run away).
+    const adding = fresh.filter((s) => s.kind === 'run' && typeof s.task === 'string' && defs.has(s.task)).length;
+    try {
+      await assertRunCapacity(c, svc, adding);
+    } catch (err) {
+      if (err instanceof RunLimitError) return err.message;
+      throw err;
+    }
     for (const s of fresh) {
       if (s.kind === 'sleep') {
         const ms = Math.min(Math.max(0, Number(s.ms) || 0), 366 * 86_400_000);
@@ -134,6 +142,12 @@ async function suspend(run: Row, svc: Row, steps: any[], log: Log): Promise<void
     return true;
   });
   if (!ok) return;
+  if (typeof ok === 'string') {
+    // Nothing was recorded: the attempt fails (and retries with backoff, by which time runs may have finished).
+    const delay = await attemptFailed(run, `could not start subtasks: ${ok}`, true);
+    log(delay !== null ? `==> Could not start subtasks: ${ok}. Retrying in ${Math.round(delay)}s` : `==> Run failed: could not start subtasks: ${ok}`, delay !== null ? 'warn' : 'error');
+    return;
+  }
   if (children.length) log(`==> Waiting for ${children.length} subtask${children.length === 1 ? '' : 's'}: ${children.join(', ')}`);
   for (const ms of sleeps) {
     log(`==> Sleeping for ${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`);

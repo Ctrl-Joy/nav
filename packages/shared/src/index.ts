@@ -695,6 +695,8 @@ export interface Sandbox {
   driver: 'process' | 'docker' | null;
   /** False on the process driver: commands run as plain host processes (development only). */
   isolated: boolean;
+  /** True when the sandbox cannot reach private networks or its node: no network, or egress behind host firewall rules. */
+  egressFiltered: boolean;
   nodeId: string | null;
   envKeys: string[];
   fromSnapshotId: string | null;

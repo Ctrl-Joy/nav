@@ -1,7 +1,7 @@
 // Docker driver: immutable images per deploy, hardened containers, per-workspace bridge networks.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
@@ -206,6 +206,31 @@ async function extractStatic(docker: Docker, tag: string, ctx: BuildContext, pub
   }
 }
 
+/** Largest Dockerfile a build reads. */
+export const MAX_DOCKERFILE_BYTES = 1024 * 1024;
+
+/** Real path of `p` (symlinks followed), which must be inside the checked-out repository `srcDir`. */
+async function insideRepo(srcDir: string, p: string, what: string): Promise<string> {
+  const root = await realpath(srcDir);
+  const real = await realpath(p).catch(() => null);
+  if (!real) throw new Error(`${what} not found at ${path.relative(srcDir, p).split(path.sep).join('/') || '.'}`);
+  const rel = path.relative(root, real);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error(`${what} must be inside the repository`);
+  return real;
+}
+
+/**
+ * The Dockerfile a build uses: resolved (symlinks included) to a regular file inside the repository and at most
+ * MAX_DOCKERFILE_BYTES, so a service setting cannot make the builder read files elsewhere on the node.
+ */
+export async function resolveDockerfile(srcDir: string, appDir: string, dockerfilePath: string): Promise<string> {
+  const file = await insideRepo(srcDir, path.resolve(appDir, dockerfilePath), 'Dockerfile');
+  const st = await stat(file);
+  if (!st.isFile()) throw new Error(`Dockerfile at ${dockerfilePath} is not a regular file`);
+  if (st.size > MAX_DOCKERFILE_BYTES) throw new Error(`Dockerfile at ${dockerfilePath} is larger than ${MAX_DOCKERFILE_BYTES / 1024} KiB`);
+  return file;
+}
+
 export function dockerDriver(): Driver {
   const docker = new Docker();
 
@@ -247,19 +272,18 @@ export function dockerDriver(): Driver {
     async build(ctx, detected) {
       const tag = `nav/${ctx.serviceId}:${ctx.deployId}`.toLowerCase();
       const svc = ctx.service;
-      let dockerfile = svc.dockerfile_path || 'Dockerfile';
-      let contextDir = path.resolve(ctx.appDir, svc.docker_context || '.');
-      if (!contextDir.startsWith(ctx.srcDir)) throw new Error('docker context must be inside the repository');
+      let dockerfile: string;
+      let contextDir: string;
       const extra: Record<string, string> = {};
       if (detected.runtime !== 'docker') {
         contextDir = ctx.appDir;
         dockerfile = '.nav.Dockerfile';
         extra[dockerfile] = nativeDockerfile(detected.runtime, detected.buildCommand, detected.startCommand, Object.keys(ctx.env));
         ctx.log(`==> Generated Dockerfile for the ${detected.runtime} runtime`);
-      } else if (!existsSync(path.resolve(ctx.appDir, dockerfile))) {
-        throw new Error(`Dockerfile not found at ${dockerfile}`);
       } else {
-        dockerfile = path.relative(contextDir, path.resolve(ctx.appDir, dockerfile)).split(path.sep).join('/');
+        contextDir = await insideRepo(ctx.srcDir, path.resolve(ctx.appDir, svc.docker_context || '.'), 'docker context');
+        const file = await resolveDockerfile(ctx.srcDir, ctx.appDir, svc.dockerfile_path || 'Dockerfile');
+        dockerfile = path.relative(contextDir, file).split(path.sep).join('/');
       }
       ctx.log(`==> Building image ${tag}`);
       const buildargs = detected.runtime !== 'docker' ? ctx.env : Object.fromEntries(Object.entries(ctx.env).filter(([k]) => k.startsWith('NAV_')));

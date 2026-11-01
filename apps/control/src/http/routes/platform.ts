@@ -1,5 +1,5 @@
 // Platform administration (installation-wide, not per workspace). Who is an admin is decided in one place:
-// isPlatformAdmin in lib/providerSettings.ts (NAV_ADMIN_EMAILS with a verified address, else the first user).
+// isPlatformAdmin in lib/providerSettings.ts (NAV_ADMIN_EMAILS with a verified address, else the first user outside production).
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { forbidden } from '../../lib/core.ts';
 import { ensurePlatformCertificate, platformTlsStatus } from '../../lib/platformTls.ts';

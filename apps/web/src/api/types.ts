@@ -44,6 +44,20 @@ export interface OrgMember {
   createdAt: string;
 }
 
+export interface OrgInvite {
+  id: string;
+  email: string;
+  role: OrgRole;
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** An invitation addressed to the signed-in user. */
+export interface MyOrgInvite extends OrgInvite {
+  orgId: string;
+  orgName: string;
+}
+
 export interface OrgWorkspace {
   id: string;
   name: string;

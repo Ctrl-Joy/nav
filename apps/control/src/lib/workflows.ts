@@ -15,7 +15,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { id } from '@nav/shared/ids';
 import { one, q, tx, type Client, type Row } from '../db/pool.ts';
-import { badRequest, changed, conflict, enqueue, notFound } from './core.ts';
+import { HttpError, badRequest, changed, conflict, enqueue, notFound } from './core.ts';
 
 export const RUN_JOB = 'workflow_run';
 export const MAX_INPUT_BYTES = 1024 * 1024;
@@ -108,6 +108,37 @@ export function enqueueRun(runId: string, serviceId: string, opts: { runAt?: Dat
   return enqueue(RUN_JOB, { runId, serviceId }, { runAt: opts.runAt, client: opts.client, maxAttempts: 1 });
 }
 
+const positive = (v: string | undefined, def: number) => (Number(v) > 0 ? Math.floor(Number(v)) : def);
+/** Active (queued, running or waiting) runs a workflow may have at once: bounds fan-out and API floods. */
+export const maxActiveRunsPerWorkflow = () => positive(process.env.NAV_WORKFLOW_MAX_ACTIVE_RUNS, 1000);
+/** Active runs across all workflows of a workspace. */
+export const maxActiveRunsPerWorkspace = () => positive(process.env.NAV_WORKSPACE_MAX_ACTIVE_RUNS, 5000);
+
+export class RunLimitError extends HttpError {
+  constructor(message: string) {
+    super(429, 'run_limit', message);
+  }
+}
+
+/**
+ * Throws RunLimitError when `adding` more active runs would take the workflow or its workspace past its limit.
+ * Runs inside the caller's transaction, under a per-workspace lock, so concurrent creates cannot overshoot.
+ */
+export async function assertRunCapacity(c: Client, svc: Row, adding: number): Promise<void> {
+  if (adding <= 0) return;
+  await c.query('SELECT pg_advisory_xact_lock(77030, hashtext($1))', [svc.workspace_id]);
+  const { rows: [n] } = await c.query(
+    `SELECT (SELECT count(*)::int FROM workflow_runs WHERE service_id = $1 AND status IN ('queued','running','waiting')) AS workflow,
+            (SELECT count(*)::int FROM workflow_runs r JOIN services s ON s.id = r.service_id
+              WHERE s.workspace_id = $2 AND r.status IN ('queued','running','waiting')) AS workspace`,
+    [svc.id, svc.workspace_id],
+  );
+  const perWorkflow = maxActiveRunsPerWorkflow();
+  const perWorkspace = maxActiveRunsPerWorkspace();
+  if (n.workflow + adding > perWorkflow) throw new RunLimitError(`this workflow already has ${n.workflow} active runs (limit ${perWorkflow}); wait for some to finish`);
+  if (n.workspace + adding > perWorkspace) throw new RunLimitError(`this workspace already has ${n.workspace} active workflow runs (limit ${perWorkspace}); wait for some to finish`);
+}
+
 export interface CreateRunRequest {
   task: string;
   input: unknown;
@@ -129,6 +160,9 @@ export async function createRun(svc: Row, req: CreateRunRequest): Promise<{ run:
   const key = req.idempotencyKey || null;
   const runId = id('wfr');
   const created = await tx(async (c) => {
+    // A repeated idempotency key returns the first run even at the limit.
+    if (key && (await c.query('SELECT 1 FROM workflow_runs WHERE service_id = $1 AND idempotency_key = $2', [svc.id, key])).rows[0]) return null;
+    await assertRunCapacity(c, svc, 1);
     const ins = await c.query(
       `INSERT INTO workflow_runs (id, service_id, deploy_id, task, input, max_attempts, timeout_s, backoff_s, max_backoff_s, idempotency_key, trigger, retry_of, created_by, root_run_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$1)

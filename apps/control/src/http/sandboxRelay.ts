@@ -12,6 +12,7 @@ import { nodeToken } from '@nav/shared/artifacts';
 import { SANDBOX_LIMITS } from '@nav/shared';
 import { one, q } from '../db/pool.ts';
 import { authenticate, workspaceRole, type AuthUser } from './auth.ts';
+import { redactCommand } from '../lib/sandboxes.ts';
 import { liveSandbox } from './routes/sandboxes.ts';
 import { writeAudit } from './routes/audit.ts';
 import { cookies, reject, sameOrigin } from './shell.ts';
@@ -49,7 +50,7 @@ export function relaySandboxStream(wss: WebSocketServer, req: IncomingMessage, s
           void writeAudit({
             workspaceId: sb.workspace_id, actorId: user.id, actorEmail: user.email, actorKind: fake.authKind ?? 'session', action: 'sandbox.exec',
             targetType: 'sandboxes', targetId: sb.id, ip: req.socket.remoteAddress ?? null, userAgent: String(req.headers['user-agent'] ?? ''),
-            data: { command: command === null ? null : command.slice(0, 4096), cwd, exitCode, timedOut, mode: command === null ? 'shell' : 'stream' },
+            data: { command: command === null ? null : redactCommand(command).slice(0, 4096), cwd, exitCode, timedOut, mode: command === null ? 'shell' : 'stream' },
           });
         };
         upstream.on('message', (data, isBinary) => {

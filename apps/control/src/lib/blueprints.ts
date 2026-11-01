@@ -10,7 +10,7 @@ import { one, q, tx, type Row } from '../db/pool.ts';
 import { badRequest, changed, enqueue, recordEvent } from './core.ts';
 import { listEnv, patchEnv, replaceEnv } from './env.ts';
 import { authedUrl, git } from './git.ts';
-import { createService, markForDeletion, validateCron } from './services.ts';
+import { createService, markForDeletion, repoPathError, validateCron } from './services.ts';
 import { createDatabase, credentials } from '../http/routes/databases.ts';
 import { createDeploy } from './deploys.ts';
 
@@ -35,8 +35,8 @@ const ServiceSpec = z.object({
   buildCommand: z.string().optional(),
   startCommand: z.string().optional(),
   preDeployCommand: z.string().optional(),
-  dockerfilePath: z.string().optional(),
-  dockerContext: z.string().optional(),
+  dockerfilePath: z.string().max(255).refine((p) => !repoPathError(p), 'dockerfilePath must be a relative path inside the repository').optional(),
+  dockerContext: z.string().max(255).refine((p) => !repoPathError(p), 'dockerContext must be a relative path inside the repository').optional(),
   healthCheckPath: z.string().optional(),
   plan: z.string().optional(),
   numInstances: z.number().int().min(1).max(100).optional(),
@@ -156,6 +156,8 @@ interface ApplyTarget {
     commitSha: string | null;
     /** Spec service name → the blueprint's own service (the preview copy's parent). */
     parents: Map<string, string>;
+    /** A fork's PR: nothing is inherited from the parents (no unsynced or generated values, i.e. no secrets). */
+    untrusted: boolean;
   };
 }
 
@@ -196,7 +198,7 @@ export async function applyPreviewEnvironment(env: Row, bp: Row, spec: Blueprint
         throw new Error('preview environment was deleted while it was being created');
       }
     },
-    preview: { prNumber: env.pr_number, commitSha: env.commit_sha, parents: new Map(base.map((b) => [b.name as string, b.resource_id as string])) },
+    preview: { prNumber: env.pr_number, commitSha: env.commit_sha, parents: new Map(base.map((b) => [b.name as string, b.resource_id as string])), untrusted: env.untrusted === true },
   }, log);
   await changed(bp.workspace_id, 'blueprint', bp.id);
 }
@@ -304,6 +306,7 @@ async function applySpec(spec: BlueprintSpec, t: ApplyTarget, log: (m: string) =
         parentServiceId: pv?.parents.get(s.name) ?? null, prNumber: pv?.prNumber ?? null,
       });
       sid = res.service.id as string;
+      if (pv?.untrusted) await q('UPDATE services SET untrusted = true WHERE id = $1', [sid]);
       svcIds.set(s.name, sid);
       await track('service', s.name, sid);
       created.push(res.service);
@@ -326,8 +329,8 @@ async function applySpec(spec: BlueprintSpec, t: ApplyTarget, log: (m: string) =
   // Env vars after all services exist (fromService references).
   for (const s of spec.services) {
     const sid = svcIds.get(s.name)!;
-    // A preview inherits generated / unsynced values from its parent until it has its own.
-    const parentId = pv?.parents.get(s.name);
+    // A preview inherits generated / unsynced values from its parent until it has its own; a fork's never does.
+    const parentId = pv && !pv.untrusted ? pv.parents.get(s.name) : undefined;
     const current = [...(await listEnv('service', sid)), ...(parentId ? await listEnv('service', parentId) : [])];
     const vars: EnvVar[] = pv ? [{ key: 'IS_PULL_REQUEST', value: 'true' }] : [];
     for (const e of s.envVars ?? []) {

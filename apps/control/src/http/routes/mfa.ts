@@ -32,19 +32,25 @@ export async function beginSession(req: FastifyRequest, reply: FastifyReply, use
 }
 
 /** Accepts an authenticator code (each time step once) or an unused recovery code, consuming the latter. */
-async function checkSecondFactor(user: Row, code: string): Promise<'totp' | 'recovery' | null> {
+/**
+ * Checks and consumes a second factor. Both kinds are consumed by one conditional UPDATE, so two concurrent
+ * requests with the same code (or recovery code) cannot both succeed: an authenticator code moves the last-used
+ * counter forward only if it is newer, and a recovery code is removed only if it is still there.
+ */
+export async function checkSecondFactor(user: Row, code: string): Promise<'totp' | 'recovery' | null> {
   const c = code.trim().toLowerCase();
   if (/^\d{3}\s?\d{3}$/.test(c) && user.totp_secret_enc) {
     const counter = totp.verify(decrypt(user.totp_secret_enc), c);
-    if (counter === null || (user.totp_last_counter !== null && counter <= Number(user.totp_last_counter))) return null;
-    await q('UPDATE users SET totp_last_counter = $2 WHERE id = $1', [user.id, counter]);
-    return 'totp';
+    if (counter === null) return null;
+    const used = await one(
+      'UPDATE users SET totp_last_counter = $2 WHERE id = $1 AND (totp_last_counter IS NULL OR totp_last_counter < $2) RETURNING id',
+      [user.id, counter],
+    );
+    return used ? 'totp' : null;
   }
   const hash = sha256(c.replace(/\s+/g, ''));
-  const left = (user.recovery_codes as string[]).filter((h) => h !== hash);
-  if (left.length === (user.recovery_codes as string[]).length) return null;
-  await q('UPDATE users SET recovery_codes = $2 WHERE id = $1', [user.id, JSON.stringify(left)]);
-  return 'recovery';
+  const used = await one("UPDATE users SET recovery_codes = recovery_codes - $2::text WHERE id = $1 AND recovery_codes ? $2::text RETURNING id", [user.id, hash]);
+  return used ? 'recovery' : null;
 }
 
 const Code = z.object({ code: z.string().trim().min(6).max(20) });

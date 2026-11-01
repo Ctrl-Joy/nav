@@ -20,7 +20,7 @@ import { handleWorkflowRun } from './workflows.ts';
 import { RUN_JOB, attemptFailed } from '../lib/workflows.ts';
 import { liveNodes } from './cluster.ts';
 import { startShellServer } from './shell.ts';
-import { recoverSandboxes, sandboxManagerFor } from './sandbox/index.ts';
+import { prepareSandboxes, recoverSandboxes, sandboxManagerFor } from './sandbox/index.ts';
 import { handleDiskRestore, handleDiskSnapshot } from './snapshots.ts';
 import { handleKvDelete, handleKvProvision, handleKvReconfigure, handleKvResume, handleKvSuspend, recoverKeyValues, refreshKvCertificates } from './keyvalue.ts';
 import { InstanceManager } from './instances.ts';
@@ -157,6 +157,7 @@ async function main() {
   const reportCapabilities = async () => q('UPDATE nodes SET capabilities = $2 WHERE id = $1', [nid, await detectCapabilities(driver.name)]);
   await reportCapabilities().catch((e) => console.error('[agent] capability detection', e.message));
   setInterval(() => reportCapabilities().catch(() => {}), 5 * 60_000);
+  await prepareSandboxes(sandboxes);
   await recoverSandboxes(sandboxes, nid).catch((e) => console.error('[agent] sandbox recovery', e.message));
   // Process instances do not survive an agent restart: let the cluster bring their services back to size.
   for (const r of await q("SELECT DISTINCT service_id FROM instances WHERE node_id = $1 AND stopped_at > now() - interval '1 minute'", [nid])) {

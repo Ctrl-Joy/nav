@@ -56,8 +56,9 @@ export class InstanceManager {
         NAV_EXTERNAL_HOSTNAME: url ? `${svc.slug}.${config.appsDomain}` : '',
         NAV_DISCOVERY_SERVICE: svc.slug,
         // Lets any service start and follow workflow runs in its workspace (packages/workflows createClient).
+        // Never pull request previews: they run code that has not been merged (possibly from a fork).
         NAV_API_URL: `${config.apiPublicUrl}/api/v1`,
-        NAV_WORKFLOWS_TOKEN: workflowsToken(svc.workspace_id),
+        ...(svc.parent_service_id || svc.pr_number ? {} : { NAV_WORKFLOWS_TOKEN: workflowsToken(svc.workspace_id) }),
         IS_PULL_REQUEST: svc.parent_service_id ? 'true' : (env.IS_PULL_REQUEST ?? 'false'),
       },
       files,

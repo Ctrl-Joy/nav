@@ -1,6 +1,6 @@
 // Organizations: members, the workspaces an org owns, verified domains, SAML single sign-on and SCIM provisioning
 // settings. Org owners/admins manage all of it; changes are recorded by the audit hook (routes carry :org).
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '@nav/shared/config';
 import { encrypt, sha256 } from '@nav/shared/crypto';
@@ -8,6 +8,7 @@ import { id, randomString } from '@nav/shared/ids';
 import { one, q, tx } from '../../db/pool.ts';
 import { HttpError, badRequest, conflict, forbidden, notFound } from '../../lib/core.ts';
 import { DOMAIN_RE, TXT_PREFIX, emailDomain, newVerifyToken, syncGroup, syncOrgGroups, verifyOrgDomain, type OrgRole } from '../../lib/orgs.ts';
+import { layout, sendMail } from '../../lib/mail.ts';
 import { SamlError, acsUrl, certInfo, generateSpKeyPair, idpFromFields, loginUrl, parseIdpMetadata, spEntityId, type IdpSettings } from '../../lib/saml.ts';
 import { orgRole, requireUser, workspaceRole } from '../auth.ts';
 import { uniqueSlug, userOrgs } from './auth.ts';
@@ -54,6 +55,12 @@ function samlOut(orgId: string, r: Record<string, any>) {
     },
     updatedAt: r.updated_at,
   };
+}
+
+const MAX_PENDING_ORG_INVITES = 500;
+
+function orgInviteOut(r: Record<string, any>) {
+  return { id: r.id, email: r.email, role: r.role as OrgRole, createdAt: r.created_at, expiresAt: r.expires_at };
 }
 
 async function assertNotLastOrgOwner(orgId: string, userId: string, newRole: OrgRole | null) {
@@ -141,18 +148,91 @@ export async function orgRoutes(app: FastifyInstance) {
        FROM org_members m JOIN users u ON u.id = m.user_id WHERE m.org_id = $1 ORDER BY m.created_at`,
       [org],
     );
-    return { items: rows.map((r) => ({ userId: r.id, email: r.email, name: r.name, role: r.role, mfaEnabled: r.mfa, scimManaged: r.scim, samlLinked: r.saml, createdAt: r.created_at })), nextCursor: null };
+    const invites = await q('SELECT * FROM org_invites WHERE org_id = $1 AND accepted_at IS NULL AND expires_at > now() ORDER BY created_at', [org]);
+    return {
+      items: rows.map((r) => ({ userId: r.id, email: r.email, name: r.name, role: r.role, mfaEnabled: r.mfa, scimManaged: r.scim, samlLinked: r.saml, createdAt: r.created_at })),
+      invites: invites.map(orgInviteOut),
+      nextCursor: null,
+    };
   });
 
-  app.post('/orgs/:org/members', async (req, reply) => {
+  /**
+   * Invites someone by email. Nobody joins an organization without accepting (an org admin gains power over the
+   * workspaces members bring along), and the answer is the same whether or not a NAV account uses the address.
+   */
+  app.post('/orgs/:org/members', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const { org } = req.params as { org: string };
     const myRole = await orgRole(req, org, 'admin');
     const body = z.object({ email: z.string().trim().toLowerCase().email(), role: OrgRoleSchema.default('member') }).parse(req.body);
-    if (body.role === 'owner' && myRole !== 'owner') throw badRequest('only owners can add owners');
-    const user = await one('SELECT id, email, name FROM users WHERE email = $1', [body.email]);
-    if (!user) throw new HttpError(404, 'user_not_found', 'no NAV account uses that email yet — they can join by signing in with SSO, or sign up first');
-    await q('INSERT INTO org_members (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role', [org, user.id, body.role]);
-    return reply.status(201).send({ member: { userId: user.id, email: user.email, name: user.name, role: body.role } });
+    if (body.role === 'owner' && myRole !== 'owner') throw badRequest('only owners can invite owners');
+    const pending = await one<{ n: number }>('SELECT count(*)::int AS n FROM org_invites WHERE org_id = $1 AND accepted_at IS NULL AND expires_at > now()', [org]);
+    if ((pending?.n ?? 0) >= MAX_PENDING_ORG_INVITES) throw new HttpError(429, 'invite_limit', `this organization has ${pending!.n} pending invitations; revoke some first`);
+    const me = requireUser(req);
+    const invite = (await one(
+      `INSERT INTO org_invites (id, org_id, email, role, invited_by) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (org_id, lower(email)) WHERE accepted_at IS NULL
+       DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by, created_at = now(), expires_at = now() + interval '14 days'
+       RETURNING *`,
+      [id('oin'), org, body.email, body.role, me.id],
+    ))!;
+    const orgRow = await one('SELECT name FROM orgs WHERE id = $1', [org]);
+    void sendMail({
+      to: body.email,
+      subject: `You're invited to ${orgRow?.name ?? 'an organization'} on NAV`,
+      ...layout(`Join ${orgRow?.name ?? 'the organization'} on NAV`, [
+        `${me.name} invited you to join as ${body.role}.`,
+        'Sign in (or sign up) with this email address and accept the invitation under Account settings. Nothing changes until you accept.',
+      ], { label: 'Review the invitation', url: `${config.dashboardUrl}/account#org-invites` }),
+    }).catch((e) => console.error('[mail]', e.message));
+    return reply.status(202).send({ invite: orgInviteOut(invite) });
+  });
+
+  app.delete('/orgs/:org/invites/:inviteId', async (req, reply) => {
+    const { org, inviteId } = req.params as { org: string; inviteId: string };
+    await orgRole(req, org, 'admin');
+    await q('DELETE FROM org_invites WHERE id = $1 AND org_id = $2 AND accepted_at IS NULL', [inviteId, org]);
+    return reply.status(204).send();
+  });
+
+  // The invitee's side: pending invitations for the caller's (verified) email, accepted or declined explicitly.
+  app.get('/org-invites', async (req) => {
+    const me = await one('SELECT email, email_verified_at FROM users WHERE id = $1', [requireUser(req).id]);
+    if (!me?.email_verified_at) return { items: [], emailVerified: false };
+    const rows = await q(
+      `SELECT i.*, o.name AS org_name FROM org_invites i JOIN orgs o ON o.id = i.org_id
+       WHERE lower(i.email) = lower($1) AND i.accepted_at IS NULL AND i.expires_at > now() ORDER BY i.created_at DESC`,
+      [me.email],
+    );
+    return { items: rows.map((r) => ({ ...orgInviteOut(r), orgId: r.org_id, orgName: r.org_name })), emailVerified: true };
+  });
+
+  const myInvite = async (req: FastifyRequest) => {
+    const user = requireUser(req);
+    const me = await one('SELECT email, email_verified_at FROM users WHERE id = $1', [user.id]);
+    const inv = await one('SELECT * FROM org_invites WHERE id = $1 AND accepted_at IS NULL AND expires_at > now()', [(req.params as { inviteId: string }).inviteId]);
+    if (!inv || !me || inv.email.toLowerCase() !== String(me.email).toLowerCase()) throw notFound('invitation');
+    if (!me.email_verified_at) throw new HttpError(403, 'email_unverified', 'verify your email address before accepting invitations');
+    req.auditOrgId = inv.org_id;
+    return { user, inv };
+  };
+
+  app.post('/org-invites/:inviteId/accept', async (req) => {
+    const { user, inv } = await myInvite(req);
+    const ok = await tx(async (c) => {
+      const claimed = await c.query('UPDATE org_invites SET accepted_at = now() WHERE id = $1 AND accepted_at IS NULL RETURNING id', [inv.id]);
+      if (!claimed.rowCount) return false;
+      // Accepting never lowers or raises an existing membership.
+      await c.query('INSERT INTO org_members (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT (org_id, user_id) DO NOTHING', [inv.org_id, user.id, inv.role]);
+      return true;
+    });
+    if (!ok) throw notFound('invitation');
+    return { ok: true, orgId: inv.org_id, role: inv.role };
+  });
+
+  app.post('/org-invites/:inviteId/decline', async (req, reply) => {
+    const { inv } = await myInvite(req);
+    await q('DELETE FROM org_invites WHERE id = $1 AND accepted_at IS NULL', [inv.id]);
+    return reply.status(204).send();
   });
 
   app.patch('/orgs/:org/members/:userId', async (req) => {

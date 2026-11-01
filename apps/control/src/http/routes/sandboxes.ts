@@ -16,16 +16,20 @@ import { SANDBOX_IMAGES, SANDBOX_LIMITS, SANDBOX_PLANS, type Role, type SandboxE
 import { one, q, tx, type Row } from '../../db/pool.ts';
 import { HttpError, badRequest, conflict, notFound } from '../../lib/core.ts';
 import {
-  LIVE, agentError, agentFetch, agentJson, deleteSnapshotArchive, nodeOf, placeSandbox, sandboxOut, sandboxSnapshotOut, teardownSandbox,
+  LIVE, agentError, agentFetch, agentJson, deleteSnapshotArchive, nodeOf, placeSandbox, redactCommand, sandboxOut, sandboxSnapshotOut, teardownSandbox,
   type AgentNode,
 } from '../../lib/sandboxes.ts';
+import { sandboxImageError } from '../../lib/sandboxImages.ts';
 import { requireUser, workspaceRole } from '../auth.ts';
 import { writeAudit } from './audit.ts';
 
 const EnvKey = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'env var names are letters, digits and _').max(128);
 const Env = z.record(EnvKey, z.string().max(32 * 1024)).refine((e) => Object.keys(e).length <= SANDBOX_LIMITS.maxEnvVars, `at most ${SANDBOX_LIMITS.maxEnvVars} env vars`);
 // Images are references like python:3.13-slim or ghcr.io/org/img@sha256:...; no flags, spaces or shell syntax.
-const Image = z.string().trim().max(255).regex(/^[a-z0-9][a-z0-9._\-/:@]*$/i, 'not a valid image reference');
+// Only the platform defaults and operator-allowlisted repositories (NAV_SANDBOX_IMAGES) are accepted, never NAV
+// build images or bare image IDs: the node always pulls the image, so nothing comes from its local cache.
+const Image = z.string().trim().max(255).regex(/^[a-z0-9][a-z0-9._\-/:@]*$/i, 'not a valid image reference')
+  .superRefine((v, ctx) => { const err = sandboxImageError(v); if (err) ctx.addIssue({ code: 'custom', message: err }); });
 
 const CreateBody = z.object({
   name: z.string().trim().min(1).max(64).optional(),
@@ -101,6 +105,8 @@ export async function sandboxRoutes(app: FastifyInstance) {
     }
     const runtime = body.runtime ?? (body.image ? null : snapshot?.runtime ?? 'bash');
     const image = body.image ?? snapshot?.image ?? SANDBOX_IMAGES[runtime as keyof typeof SANDBOX_IMAGES];
+    const imageError = sandboxImageError(image);
+    if (imageError) throw badRequest(imageError);
 
     const node = await placeSandbox();
     if (!node) throw new HttpError(503, 'no_capacity', 'no node is available to run sandboxes');
@@ -131,8 +137,8 @@ export async function sandboxRoutes(app: FastifyInstance) {
       await q("UPDATE sandboxes SET status = 'failed', error = $2, stopped_at = now() WHERE id = $1", [sandboxId, err.message.slice(0, 500)]);
       throw err instanceof HttpError && err.status !== 404 ? err : new HttpError(502, 'sandbox_failed', `the sandbox could not be started: ${err.message}`);
     }
-    const started = (await res.json()) as { driver: string };
-    const live = await one("UPDATE sandboxes SET status = 'running', driver = $2 WHERE id = $1 AND status = 'starting' RETURNING *", [sandboxId, started.driver]);
+    const started = (await res.json()) as { driver: string; egressFiltered?: boolean };
+    const live = await one("UPDATE sandboxes SET status = 'running', driver = $2, egress_filtered = $3 WHERE id = $1 AND status = 'starting' RETURNING *", [sandboxId, started.driver, started.egressFiltered === true]);
     return reply.status(201).send(sandboxOut(live ?? row));
   });
 
@@ -159,7 +165,7 @@ export async function sandboxRoutes(app: FastifyInstance) {
       await writeAudit({
         workspaceId: sb.workspace_id, actorId: user.id, actorEmail: user.email, actorKind: req.authKind ?? 'session', action: 'sandbox.exec',
         targetType: 'sandboxes', targetId: sb.id, ip: req.ip, userAgent: String(req.headers['user-agent'] ?? ''),
-        data: { command: body.command.slice(0, 4096), cwd: body.cwd || null, exitCode: result?.exitCode ?? null, timedOut: result?.timedOut ?? false, failed: result === null, mode: 'sync' },
+        data: { command: redactCommand(body.command).slice(0, 4096), cwd: body.cwd || null, exitCode: result?.exitCode ?? null, timedOut: result?.timedOut ?? false, failed: result === null, mode: 'sync' },
       });
     }
   });

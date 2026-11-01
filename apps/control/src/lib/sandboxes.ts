@@ -14,10 +14,32 @@ export const LIVE = ['starting', 'running'];
 export function sandboxOut(r: Row): Sandbox {
   return {
     id: r.id, workspaceId: r.workspace_id, name: r.name, runtime: r.runtime, image: r.image, plan: r.plan,
-    networkAccess: r.network_access, status: r.status, driver: r.driver, isolated: r.driver === 'docker',
+    networkAccess: r.network_access, status: r.status, driver: r.driver, isolated: r.driver === 'docker', egressFiltered: r.egress_filtered === true,
     nodeId: r.node_id, envKeys: r.env_keys ?? [], fromSnapshotId: r.from_snapshot_id, ttlSeconds: r.ttl_seconds,
     expiresAt: r.expires_at, execCount: r.exec_count, lastExecAt: r.last_exec_at, error: r.error, createdAt: r.created_at, stoppedAt: r.stopped_at,
   };
+}
+
+const R = '[REDACTED]';
+const VALUE = String.raw`("[^"]*"|'[^']*'|\S+)`;
+const SECRET_NAME = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*)?(?:TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIALS?|AUTH)`;
+
+/**
+ * The command as it goes into the audit log: obvious inline secrets are replaced (password / token flags,
+ * SECRET-like VAR=value assignments, Authorization headers and bearer tokens, passwords in URLs, mysql -p...).
+ * Best effort: the command is still recorded, so what was run stays visible.
+ */
+export function redactCommand(cmd: string): string {
+  return cmd
+    .replace(new RegExp(String.raw`(--?(?:password|passwd|pass|token|secret|api-?key|access-?key|auth-token|client-secret)(?:=|\s+))${VALUE}`, 'gi'), `$1${R}`)
+    .replace(new RegExp(String.raw`\b(${SECRET_NAME})=${VALUE}`, 'gi'), `$1=${R}`)
+    .replace(new RegExp(String.raw`(authorization:\s*(?:bearer|basic|token)?\s*)([^\s"']+)`, 'gi'), `$1${R}`)
+    .replace(/\b(bearer\s+)([A-Za-z0-9\-._~+/]+=*)/gi, `$1${R}`)
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, `$1${R}@`)
+    // mysql-family clients take the password glued to -p; sshpass and redis-cli take it as the next word.
+    .replace(/(\b(?:mysql|mariadb|mysqldump|mysqladmin)\b[^|;&\n]*?\s-p)(?!\s)(\S+)/gi, `$1${R}`)
+    .replace(/(\bsshpass\s+-p\s*)(\S+)/gi, `$1${R}`)
+    .replace(/(\bredis-cli\b[^|;&\n]*?\s-a\s+)(\S+)/gi, `$1${R}`);
 }
 
 export function sandboxSnapshotOut(r: Row): SandboxSnapshot {

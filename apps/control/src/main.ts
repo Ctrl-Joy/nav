@@ -6,6 +6,7 @@ import { buildApp } from './http/app.ts';
 import { startScheduler } from './scheduler/index.ts';
 import { startControlJobs } from './scheduler/jobs.ts';
 import { ensurePlatformCertificate } from './lib/platformTls.ts';
+import { adminConfigWarning } from './lib/providerSettings.ts';
 import { startLogStreams, startMetricsStreams } from './scheduler/streams.ts';
 import { startNotifier } from './scheduler/notifier.ts';
 import { startWakeListener } from './lib/sleep.ts';
@@ -14,6 +15,9 @@ if (!process.env.NAV_MASTER_KEY) {
   console.error('NAV_MASTER_KEY must be set (64 hex chars). Use `npm run dev` for local development.');
   process.exit(1);
 }
+
+const adminWarning = adminConfigWarning();
+if (adminWarning) console.warn(`[control] WARNING: ${adminWarning}`);
 
 await migrate();
 const app = await buildApp();

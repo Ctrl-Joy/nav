@@ -10,6 +10,16 @@ export const NODE_LANE = ['instance_start', 'instance_stop', 'node_cleanup'];
 export const WORKFLOW_LANE = [RUN_JOB];
 export type Lane = 'work' | 'node' | 'workflow';
 
+/**
+ * Workflow runs of workflows already at their concurrency: one aggregate over the running workflow jobs (indexed
+ * by jobs_workflow_running), computed once per claim rather than a count per queued candidate. Thousands of queued
+ * runs waiting on a busy workflow therefore cost one hashed lookup each, and the other lanes never evaluate it.
+ */
+const WORKFLOW_SATURATED = `AND COALESCE(NOT (j.payload->>'serviceId' = ANY (ARRAY(
+             SELECT r.payload->>'serviceId' FROM jobs r LEFT JOIN services s ON s.id = r.payload->>'serviceId'
+             WHERE r.status = 'running' AND r.kind = '${RUN_JOB}'
+             GROUP BY r.payload->>'serviceId', s.workflow_concurrency HAVING count(*) >= COALESCE(s.workflow_concurrency, 10)))), true)`;
+
 export interface ClaimedJob { id: number; kind: string; payload: any; attempts: number; max_attempts: number }
 
 /**
@@ -32,9 +42,7 @@ export async function claim(nid: string, lane: Lane, draining: boolean): Promise
            AND NOT (j.kind LIKE 'kv\\_%' AND EXISTS (SELECT 1 FROM key_values k WHERE k.id = j.payload->>'keyValueId' AND k.node_id IS NOT NULL AND k.node_id <> $1))
            AND NOT (j.kind LIKE 'db\\_%' AND EXISTS (SELECT 1 FROM databases d WHERE d.id = j.payload->>'databaseId' AND d.node_id IS NOT NULL AND d.node_id <> $1))
            AND (j.concurrency_key IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status = 'running' AND r.concurrency_key = j.concurrency_key))
-           AND NOT (j.kind = '${RUN_JOB}' AND (
-             SELECT count(*) FROM jobs r WHERE r.status = 'running' AND r.kind = '${RUN_JOB}' AND r.payload->>'serviceId' = j.payload->>'serviceId'
-           ) >= COALESCE((SELECT s.workflow_concurrency FROM services s WHERE s.id = j.payload->>'serviceId'), 10))
+           ${lane === 'workflow' ? WORKFLOW_SATURATED : ''}
          ORDER BY j.id FOR UPDATE SKIP LOCKED LIMIT 1)
        RETURNING id, kind, payload, attempts, max_attempts`,
       [nid, lane, NODE_LANE, WORKFLOW_LANE, draining, CONTROL_JOBS],

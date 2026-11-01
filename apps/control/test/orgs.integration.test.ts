@@ -323,3 +323,18 @@ test('SCIM provisions, maps groups to roles, deprovisions and audits', async () 
     assert.ok(actions.includes(a), `audit log has ${a} (got ${[...new Set(actions)].join(', ')})`);
   }
 });
+
+test('a known SAML identity is refused when the IdP asserts a different email than the account\'s', async () => {
+  // Same NameID as Ada's linked identity, but the IdP now says it is someone else (a reused or renamed NameID).
+  const rid = await startLogin();
+  const r = await call('POST', `/api/v1/auth/saml/${orgId}/acs`, { form: { SAMLResponse: idp.signedAssertionResponse({ requestId: rid, nameId: 'ada@acme.test', email: 'mallory@acme.test' }) } });
+  assert.equal(r.status, 302);
+  assert.match(r.headers.location, /error=saml_email_mismatch/);
+  assert.ok(!r.cookies.some((c) => c.name === 'nav_session'), 'no session');
+  assert.equal(await db.one("SELECT 1 FROM users WHERE email = 'mallory@acme.test'"), null, 'no account was created or renamed');
+
+  // Case differences alone are not drift.
+  const rid2 = await startLogin();
+  const ok = await call('POST', `/api/v1/auth/saml/${orgId}/acs`, { form: { SAMLResponse: idp.signedAssertionResponse({ requestId: rid2, nameId: 'ada@acme.test', email: 'Ada@Acme.test' }) } });
+  assert.doesNotMatch(String(ok.headers.location), /error=/);
+});

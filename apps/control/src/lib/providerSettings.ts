@@ -87,17 +87,26 @@ export async function deleteProvider(p: ConfigurableProvider): Promise<boolean> 
 
 // ---- Instance administrators ----
 
+/** Startup warning for production instances without NAV_ADMIN_EMAILS (they have no instance administrator). */
+export function adminConfigWarning(): string | null {
+  if (config.env !== 'production' || config.adminEmails.length) return null;
+  return 'NAV_ADMIN_EMAILS is not set: this production instance has no instance administrator (sign-in providers and platform settings cannot be changed from the dashboard). Set it to the operators\' email addresses.';
+}
+
 /**
  * NAV instance administrators manage instance-wide settings such as sign-in providers. With NAV_ADMIN_EMAILS set,
  * they are the listed addresses, and only once the account has proved it owns the address (a provider vouched for
  * it, or a password reset link was used); otherwise anyone could sign up with an operator's email before they do.
- * Without the variable, the oldest account on the instance (normally whoever installed it) is the administrator.
+ * Without the variable, outside production, the oldest account on the instance (normally whoever installed it) is
+ * the administrator. In production that implicit rule is off: deleting the first account would silently hand the
+ * instance to the next-oldest one, so production has no administrator until NAV_ADMIN_EMAILS names one.
  */
 export async function isPlatformAdmin(userId: string): Promise<boolean> {
   if (config.adminEmails.length) {
     const u = await one<{ email: string; email_verified_at: string | null }>('SELECT email, email_verified_at FROM users WHERE id = $1', [userId]);
     return !!u?.email_verified_at && config.adminEmails.includes(u.email.toLowerCase());
   }
+  if (config.env === 'production') return false;
   const first = await one<{ id: string }>('SELECT id FROM users ORDER BY created_at, id LIMIT 1');
   return first?.id === userId;
 }

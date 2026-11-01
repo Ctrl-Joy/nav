@@ -5,7 +5,7 @@ import { id } from '@nav/shared/ids';
 import { SERVICE_PLANS, slugify, type CreateServiceInput, type Disk } from '@nav/shared';
 import { config } from '@nav/shared/config';
 import { notify, one, q, tx, type Row } from '../db/pool.ts';
-import { badRequest, changed, recordEvent } from './core.ts';
+import { HttpError, badRequest, changed, recordEvent } from './core.ts';
 import { listEnv, listFiles, replaceEnv, replaceFiles } from './env.ts';
 import { installationFor, lsRemote, validateRepoUrl } from './git.ts';
 import { createDeploy } from './deploys.ts';
@@ -135,18 +135,37 @@ export async function createService(opts: CreateOptions): Promise<{ service: Row
   return { service: svc, deploy };
 }
 
-/** Clone a service for a pull request / branch preview. Idempotent per (parent, pr). */
-export async function createPreview(parent: Row, branch: string, prNumber: number | null, actorId: string | null, sha?: string): Promise<{ service: Row; deploy: Row | null }> {
+/**
+ * Null when `p` is a plain path relative to the repository (Dockerfile path, Docker context), otherwise why not:
+ * no absolute or drive paths, no backslashes, no `..` segments. The build checks the resolved path again.
+ */
+export function repoPathError(p: string): string | null {
+  if (!p.trim()) return 'must not be empty';
+  if (p.includes('\0') || p.includes('\\')) return 'must not contain backslashes or NUL';
+  if (p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.startsWith('~')) return 'must be relative to the repository';
+  if (p.split('/').some((s) => s === '..')) return 'must not contain ".."';
+  return null;
+}
+
+/**
+ * Clone a service for a pull request / branch preview. Idempotent per (parent, pr). An untrusted preview (a pull
+ * request from a fork) starts with an empty environment: none of the parent's env vars, secret files or env
+ * groups, only IS_PULL_REQUEST and the NAV_* variables every deploy gets.
+ */
+export async function createPreview(parent: Row, branch: string, prNumber: number | null, actorId: string | null, sha?: string, opts: { untrusted?: boolean } = {}): Promise<{ service: Row; deploy: Row | null }> {
   if (prNumber) {
     const existing = await one('SELECT * FROM services WHERE parent_service_id = $1 AND pr_number = $2', [parent.id, prNumber]);
     if (existing) {
+      // A preview made for a same-repository PR never turns into a fork's (a PR's head repository cannot change),
+      // but be safe: untrusted code never deploys into a service that holds the parent's secrets.
+      if (opts.untrusted && !existing.untrusted) throw new HttpError(409, 'preview_untrusted', 'this preview holds the parent service\'s secrets and cannot run code from a fork');
       const deploy = await createDeploy(existing, { trigger: 'preview', actorId, commitSha: sha ?? null });
       return { service: existing, deploy };
     }
   }
-  const envVars = await listEnv('service', parent.id);
+  const envVars = opts.untrusted ? [] : await listEnv('service', parent.id);
   envVars.push({ key: 'IS_PULL_REQUEST', value: 'true' });
-  const groups = await q('SELECT group_id FROM service_env_groups WHERE service_id = $1', [parent.id]);
+  const groups = opts.untrusted ? [] : await q('SELECT group_id FROM service_env_groups WHERE service_id = $1', [parent.id]);
   const suffix = prNumber ? `pr-${prNumber}` : slugify(branch).slice(0, 20);
   const res = await createService({
     workspaceId: parent.workspace_id,
@@ -176,13 +195,16 @@ export async function createPreview(parent: Row, branch: string, prNumber: numbe
       instanceCount: 1,
       autoDeploy: 'commit',
       envVars,
-      secretFiles: await listFiles('service', parent.id),
+      secretFiles: opts.untrusted ? [] : await listFiles('service', parent.id),
       envGroupIds: groups.map((g) => g.group_id),
     },
   });
-  await q('UPDATE services SET static_routes = $2, static_headers = $3 WHERE id = $1', [res.service.id, JSON.stringify(parent.static_routes), JSON.stringify(parent.static_headers)]);
-  const deploy = await createDeploy(res.service, { trigger: 'preview', actorId, commitSha: sha ?? null });
-  return { service: res.service, deploy };
+  const svc = (await one(
+    'UPDATE services SET static_routes = $2, static_headers = $3, untrusted = $4 WHERE id = $1 RETURNING *',
+    [res.service.id, JSON.stringify(parent.static_routes), JSON.stringify(parent.static_headers), !!opts.untrusted],
+  ))!;
+  const deploy = await createDeploy(svc, { trigger: 'preview', actorId, commitSha: sha ?? null });
+  return { service: svc, deploy };
 }
 
 export async function markForDeletion(svc: Row, actorId: string | null): Promise<void> {

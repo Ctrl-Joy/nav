@@ -7,7 +7,7 @@ import os from 'node:os';
 import tls from 'node:tls';
 import { decrypt } from '@nav/shared/crypto';
 import { one, q, type Row } from '../db/pool.ts';
-import { assertPublicHost, assertPublicUrl } from '../lib/targets.ts';
+import { pinnedLookup, publicFetch, resolvePublicHost } from '../lib/targets.ts';
 
 const SEVERITY: Record<string, number> = { error: 3, warn: 4, info: 6, debug: 7 };
 const MAX_BUFFER = 4 * 1048576;
@@ -54,9 +54,13 @@ class SyslogSink {
     this.connecting = true;
     const [host, portStr] = splitHostPort(this.stream.endpoint);
     try {
-      await assertPublicHost(host);
+      // Connect to the address that was checked (never a second DNS answer); TLS still verifies the configured name.
+      const pin = await resolvePublicHost(host);
       const port = Number(portStr);
-      const sock = this.stream.protocol === 'syslog-tls' ? tls.connect({ host, port, servername: net.isIP(host) ? undefined : host }) : net.connect({ host, port });
+      const lookup = pin ? pinnedLookup(pin) : undefined;
+      const sock = this.stream.protocol === 'syslog-tls'
+        ? tls.connect({ host, port, servername: net.isIP(host) ? undefined : host, ...(lookup ? { lookup } : {}) })
+        : net.connect({ host, port, ...(lookup ? { lookup } : {}) });
       await new Promise<void>((resolve, reject) => {
         sock.once(this.stream.protocol === 'syslog-tls' ? 'secureConnect' : 'connect', resolve);
         sock.once('error', reject);
@@ -133,9 +137,8 @@ export function startLogStreams(): void {
       }
       for (const { stream, lines } of https.values()) {
         try {
-          await assertPublicUrl(stream.endpoint);
           const body = lines.map((l) => JSON.stringify({ timestamp: new Date(l.ts).toISOString(), level: l.level, message: l.message, service: l.app, host: l.slug, stream: l.stream, instanceId: l.instance_id, deployId: l.deploy_id })).join('\n');
-          const res = await fetch(stream.endpoint, {
+          const res = await publicFetch(stream.endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/x-ndjson', ...(stream.token_enc ? { authorization: `Bearer ${decrypt(stream.token_enc)}` } : {}) },
             body,
@@ -211,9 +214,9 @@ export async function pushMetrics(s: Row): Promise<void> {
   const payload = await otlpPayload(s.workspace_id);
   if (!payload) return;
   try {
-    const url = new URL('/v1/metrics', (await assertPublicUrl(s.endpoint)).href.replace(/\/v1\/metrics\/?$/, '/'));
+    const url = new URL('/v1/metrics', new URL(s.endpoint).href.replace(/\/v1\/metrics\/?$/, '/'));
     const headers = s.headers_enc ? (JSON.parse(decrypt(s.headers_enc)) as Record<string, string>) : {};
-    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
+    const res = await publicFetch(url.href, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
     await res.body?.cancel().catch(() => {});
     await q('UPDATE metrics_streams SET last_error = $2::text, last_sent_at = CASE WHEN $2::text IS NULL THEN now() ELSE last_sent_at END WHERE workspace_id = $1', [s.workspace_id, res.ok ? null : `HTTP ${res.status}`]);
   } catch (err) {

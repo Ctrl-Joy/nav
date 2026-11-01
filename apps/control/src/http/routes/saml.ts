@@ -120,7 +120,12 @@ export async function samlRoutes(app: FastifyInstance) {
     let result: { userId: string; created: boolean; tookOver: boolean };
     try {
       result = await tx(async (c) => {
-        const ident = (await c.query("SELECT user_id FROM user_identities WHERE provider = 'saml' AND subject = $1", [subject])).rows[0];
+        const ident = (await c.query("SELECT i.user_id, u.email FROM user_identities i JOIN users u ON u.id = i.user_id WHERE i.provider = 'saml' AND i.subject = $1", [subject])).rows[0];
+        // A known SAML identity signs in only while the IdP still asserts the account's own address (checked to be
+        // in a verified domain above): if the IdP's email for this NameID drifted, the NameID may have been reused.
+        if (ident && String(ident.email).toLowerCase() !== user.email!.toLowerCase()) {
+          throw new SamlError('saml_email_mismatch', `the identity provider asserted ${user.email}, but this SAML identity belongs to an account with a different email; ask an administrator to update the account or the IdP`);
+        }
         const claimed = ident ? { userId: ident.user_id as string, created: false, tookOver: false } : await claimAccount(c, user.email!, name);
         const scim = (await c.query('SELECT active FROM scim_users WHERE org_id = $1 AND user_id = $2', [org, claimed.userId])).rows[0];
         if (scim && !scim.active) throw new SamlError('saml_deprovisioned', 'the account was deprovisioned by the organization');

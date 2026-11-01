@@ -58,6 +58,10 @@ export interface SandboxDriver {
   name: 'process' | 'docker';
   /** False for the process driver: commands run as ordinary host processes. */
   isolated: boolean;
+  /** Whether egress sandboxes are kept off private networks and the node by host firewall rules. */
+  readonly egressFiltered: boolean;
+  /** One-time setup at agent start (docker: the egress network and its firewall rules). */
+  prepare?(): Promise<void>;
   create(spec: SandboxSpec): Promise<SandboxBox>;
   /** Re-attaches to a sandbox that survived an agent restart (docker). */
   adopt?(id: string): Promise<SandboxBox | null>;

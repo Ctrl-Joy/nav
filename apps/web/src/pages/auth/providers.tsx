@@ -25,6 +25,7 @@ export function oauthErrorMessage(code: string | null, provider: string | null):
     case 'saml_no_email': return "Your identity provider didn't send an email address. Ask your admin to map the email attribute.";
     case 'saml_domain': return "Your email address isn't in a domain your organization has verified.";
     case 'saml_deprovisioned': return 'Your access was removed by your organization. Contact your admin.';
+    case 'saml_email_mismatch': return 'Your identity provider sent a different email address than the one on your NAV account. Ask your admin to update your account or your identity provider profile.';
     default: return `We couldn't sign you in with ${p}. Please try again.`;
   }
 }

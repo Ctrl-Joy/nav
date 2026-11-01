@@ -12,6 +12,7 @@ export const qk = {
   workspaces: ['workspaces'] as const,
   org: (org: string) => ['org', org] as const,
   orgMembers: (org: string) => ['org', org, 'members'] as const,
+  myOrgInvites: ['org-invites'] as const,
   orgWorkspaces: (org: string) => ['org', org, 'workspaces'] as const,
   orgDomains: (org: string) => ['org', org, 'domains'] as const,
   orgSaml: (org: string) => ['org', org, 'saml'] as const,

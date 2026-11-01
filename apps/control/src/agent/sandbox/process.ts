@@ -162,6 +162,7 @@ export function processSandboxDriver(): SandboxDriver {
   return {
     name: 'process',
     isolated: false,
+    egressFiltered: false,
     async create(spec) {
       if (!/^[a-z0-9_]+$/.test(spec.id)) throw new Error('invalid sandbox id');
       const root = path.join(sandboxesDir(), spec.id);
