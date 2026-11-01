@@ -8,6 +8,27 @@ export interface AppConfig {
   edgeHttpPort: number | null;
   driver: string;
   version: string;
+  auth?: { providers: Partial<Record<AuthProvider, boolean>> };
+}
+
+export type AuthProvider = 'github' | 'gitlab' | 'bitbucket' | 'google' | 'sso';
+
+export interface SessionInfo {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  ip: string | null;
+  userAgent: string | null;
+  current: boolean;
+}
+
+export interface IdentityInfo {
+  provider: AuthProvider;
+  email: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
 }
 
 export interface MeResponse {

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Check } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'accent';
@@ -8,7 +9,7 @@ const toneClass: Record<Tone, string> = {
   warning: 'bg-warning-soft text-warning',
   danger: 'bg-danger-soft text-danger',
   info: 'bg-info-soft text-info',
-  neutral: 'bg-neutral-soft text-fg-muted',
+  neutral: 'bg-neutral-soft text-fg',
   accent: 'bg-accent-soft text-accent',
 };
 
@@ -25,7 +26,7 @@ export function Badge({ tone = 'neutral', children, className, mono }: { tone?: 
   return (
     <span
       className={cn(
-        'inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[11.5px] font-medium whitespace-nowrap',
+        'inline-flex h-5 items-center gap-1 rounded-[3px] px-1.5 text-[11.5px] font-medium whitespace-nowrap',
         mono && 'font-mono',
         toneClass[tone],
         className,
@@ -101,9 +102,9 @@ export function StatusPill({ status, label, className }: { status: string; label
   const def = statusDef(status);
   return (
     <span
-      className={cn('inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap', toneClass[def.tone], className)}
+      className={cn('inline-flex h-[22px] items-center gap-1.5 rounded-[3px] px-2 text-[12px] font-medium whitespace-nowrap', toneClass[def.tone], className)}
     >
-      <StatusDot tone={def.tone} pulse={def.pulse} />
+      {def.tone === 'success' ? <Check className="size-3.5 shrink-0" strokeWidth={2.25} aria-hidden /> : <StatusDot tone={def.tone} pulse={def.pulse} />}
       {label ?? def.label}
     </span>
   );
@@ -113,7 +114,7 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   return (
     <kbd
       className={cn(
-        'inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-surface-2 px-1 font-mono text-[10.5px] text-fg-muted',
+        'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[3px] bg-surface-3 px-1 font-mono text-[10.5px] font-medium text-fg-muted',
         className,
       )}
     >

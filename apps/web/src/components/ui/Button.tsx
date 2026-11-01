@@ -6,21 +6,21 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outl
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const base =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full ' +
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[3px] ' +
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 select-none';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'nv-btn nv-cta',
   secondary: 'nv-btn nv-hair',
-  ghost: 'rounded-lg font-medium text-fg-muted transition-colors hover:text-fg hover:bg-surface-2',
-  danger: 'nv-btn border border-danger/60 bg-danger/15 font-medium text-danger hover:bg-danger/25 hover:shadow-[0_0_20px_rgb(255_123_134/0.25)]',
-  'outline-danger': 'rounded-full font-medium border border-danger/40 text-danger transition-colors hover:bg-danger-soft',
+  ghost: 'font-medium text-fg-muted transition-colors hover:text-fg hover:bg-surface-2',
+  danger: 'nv-btn border border-danger bg-danger font-medium text-white hover:brightness-110 dark:text-black',
+  'outline-danger': 'font-medium border border-danger/50 text-danger transition-colors hover:bg-danger-soft',
 };
 
 const sizes: Record<ButtonSize, string> = {
   xs: 'h-6 px-2 text-xs',
   sm: 'h-7 px-3 text-[13px]',
-  md: 'h-8 px-3.5 text-[13px]',
+  md: 'h-8 px-3 text-[13px]',
   lg: 'h-10 px-5 text-[14px]',
 };
 

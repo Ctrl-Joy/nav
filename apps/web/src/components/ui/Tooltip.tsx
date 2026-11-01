@@ -11,7 +11,7 @@ export function Tooltip({ content, children, side = 'top', className }: { conten
         role="tooltip"
         id={id}
         className={cn(
-          'pointer-events-none absolute left-1/2 z-50 w-max max-w-64 -translate-x-1/2 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs text-fg opacity-0 shadow-pop transition-opacity delay-150',
+          'pointer-events-none absolute left-1/2 z-50 w-max max-w-64 -translate-x-1/2 rounded-[3px] border border-border-strong bg-popover px-2 py-1 text-xs text-fg opacity-0 shadow-pop transition-opacity delay-150',
           'group-hover/tt:opacity-100 group-focus-within/tt:opacity-100',
           side === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5',
         )}

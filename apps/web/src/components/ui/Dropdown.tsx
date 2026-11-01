@@ -104,7 +104,7 @@ export function Dropdown({
           role="menu"
           onKeyDown={onMenuKey}
           className={cn(
-            'absolute z-50 animate-fade-in rounded-lg border border-border bg-bg-elevated p-1 shadow-pop',
+            'absolute z-50 animate-fade-in rounded-[3px] border border-border-strong bg-popover p-1.5 shadow-pop',
             side === 'bottom' ? 'top-full mt-1.5' : 'bottom-full mb-1.5',
             align === 'end' ? 'right-0' : 'left-0',
             width,
@@ -119,7 +119,7 @@ export function Dropdown({
 
 const itemClass = (danger?: boolean, disabled?: boolean) =>
   cn(
-    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] outline-none',
+    'flex w-full items-center gap-2.5 rounded-[3px] px-2 py-2 text-left text-[13.5px] outline-none',
     danger ? 'text-danger focus:bg-danger-soft hover:bg-danger-soft' : 'text-fg focus:bg-surface-2 hover:bg-surface-2',
     disabled && 'pointer-events-none opacity-50',
   );
@@ -175,9 +175,9 @@ export function DropdownItem({
 }
 
 export function DropdownLabel({ children }: { children: ReactNode }) {
-  return <div className="px-2 pt-1.5 pb-1 text-[11px] font-medium tracking-wide text-fg-subtle uppercase">{children}</div>;
+  return <div className="px-2 pt-2 pb-1 font-mono text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{children}</div>;
 }
 
 export function DropdownSeparator() {
-  return <div role="separator" className="my-1 h-px bg-border" />;
+  return <div role="separator" className="mx-2 my-1.5 h-px bg-border-strong" />;
 }

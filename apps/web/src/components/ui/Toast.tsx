@@ -54,7 +54,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className="pointer-events-auto flex animate-slide-up items-start gap-3 rounded-lg border border-border bg-bg-elevated p-3 shadow-pop"
+            className="pointer-events-auto flex animate-slide-up items-start gap-3 rounded-[3px] border border-border-strong bg-popover p-3 shadow-pop"
           >
             {t.kind === 'success' && <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />}
             {t.kind === 'error' && <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />}

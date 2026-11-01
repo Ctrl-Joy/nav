@@ -31,7 +31,7 @@ import { useTitle } from '@/lib/useTitle';
 
 type Resource = { kind: 'service'; item: Service } | { kind: 'database'; item: Database };
 
-function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { ws } = useWorkspace();
   const create = useCreateProject(ws);
   const toast = useToast();

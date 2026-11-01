@@ -43,7 +43,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         if (e.target === ref.current && dismissable) onCloseRef.current();
       }}
       className={cn(
-        'm-auto w-[calc(100%-2rem)] rounded-xl border border-border bg-surface p-0 text-fg shadow-pop',
+        'm-auto w-[calc(100%-2rem)] rounded-[4px] border border-border-strong bg-popover p-0 text-fg shadow-pop',
         'open:animate-slide-up backdrop:animate-fade-in',
         widths[size],
       )}
@@ -52,7 +52,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         <div className="flex max-h-[85dvh] flex-col">
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
             <div className="min-w-0">
-              <h2 id="dialog-title" className="text-[15px] font-semibold">
+              <h2 id="dialog-title" className="text-[17px] font-semibold">
                 {title}
               </h2>
               {description && <p className="mt-1 text-[13px] text-fg-muted">{description}</p>}

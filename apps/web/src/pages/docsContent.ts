@@ -625,7 +625,31 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
           "Access is scoped per workspace with the owner, admin, developer and viewer roles. Every resource lookup goes through the caller's membership.",
           "Auth endpoints are rate limited, request bodies have size limits and inputs are validated with zod.",
           "Build and run sandboxes never receive platform variables, the database URL or the master key.",
+          "Sign-in with GitHub, GitLab, Bitbucket, Google or SSO uses the authorization-code flow with a one-time state cookie, and PKCE everywhere except GitHub. A provider account is linked to an existing NAV account by email only when that account's address is verified, so nobody can pre-register your email and wait for you to sign in.",
+          "Password reset links are single-use, stored hashed, expire after an hour and sign out every other session. The forgot-password endpoint gives the same answer whether or not the account exists.",
         ],
+      },
+      {
+        type: 'h3',
+        text: 'Sign-in providers',
+      },
+      {
+        type: 'p',
+        text: "Each provider turns on when its client ID and secret are set. Register the callback URL `<NAV_API_PUBLIC_URL>/api/v1/auth/oauth/<provider>/callback` with GitLab, Bitbucket and Google, and `/api/v1/auth/github/callback` with GitHub. SSO works with any OpenID Connect identity provider for the email domains you list.",
+      },
+      {
+        type: 'code',
+        code: `NAV_GITHUB_CLIENT_ID=...       NAV_GITHUB_CLIENT_SECRET=...
+NAV_GITLAB_CLIENT_ID=...       NAV_GITLAB_CLIENT_SECRET=...   # NAV_GITLAB_URL for self-managed GitLab
+NAV_BITBUCKET_CLIENT_ID=...    NAV_BITBUCKET_CLIENT_SECRET=...
+NAV_GOOGLE_CLIENT_ID=...       NAV_GOOGLE_CLIENT_SECRET=...
+NAV_SSO_ISSUER=https://login.example.com
+NAV_SSO_CLIENT_ID=...          NAV_SSO_CLIENT_SECRET=...
+NAV_SSO_DOMAINS=example.com,example.org`,
+      },
+      {
+        type: 'p',
+        text: "NAV doesn't send email yet. Password reset links are written to the control plane log on a line starting with `[auth] password reset requested`, so an operator can pass them on.",
       },
       {
         type: 'p',

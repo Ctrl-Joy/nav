@@ -80,7 +80,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
     const nav: [string, string, ReactNode][] = [
       ['Overview', '', <LayoutGrid className="size-4" />],
       ['Projects', 'projects', <FolderKanban className="size-4" />],
-      ['Databases', 'databases', <ResourceIcon kind="postgres" boxed={false} />],
+      ['Postgres', 'databases', <ResourceIcon kind="postgres" boxed={false} />],
       ['Env Groups', 'env-groups', <Boxes className="size-4" />],
       ['Blueprints', 'blueprints', <FileStack className="size-4" />],
       ['Activity', 'activity', <Activity className="size-4" />],
@@ -117,11 +117,11 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
         onClose();
       }}
       onMouseDown={(e) => e.target === ref.current && onClose()}
-      className="mx-auto mt-[12vh] w-[calc(100%-2rem)] max-w-xl rounded-xl border border-border bg-bg-elevated p-0 text-fg shadow-pop open:animate-slide-up"
+      className="mx-auto mt-[12vh] w-[calc(100%-2rem)] max-w-xl rounded-[4px] border border-border-strong bg-popover p-0 text-fg shadow-pop open:animate-slide-up"
     >
       {open && (
         <div>
-          <div className="flex items-center gap-2 border-b border-border px-3">
+          <div className="flex items-center gap-2.5 border-b border-border-strong px-3.5">
             <Search className="size-4 text-fg-subtle" />
             <input
               ref={inputRef}
@@ -155,7 +155,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
               lastGroup = item.group;
               return (
                 <div key={item.id}>
-                  {header && <div className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-fg-subtle uppercase">{header}</div>}
+                  {header && <div className="px-2 pt-2.5 pb-1 font-mono text-[10.5px] font-medium tracking-[0.08em] text-fg-subtle uppercase">{header}</div>}
                   <div
                     id={`pal-${item.id}`}
                     data-index={idx}
@@ -163,7 +163,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
                     aria-selected={idx === active}
                     onMouseMove={() => setActive(idx)}
                     onClick={() => run(item)}
-                    className={cn('flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-[13px]', idx === active ? 'bg-surface-2 text-fg' : 'text-fg-muted')}
+                    className={cn('flex cursor-pointer items-center gap-2.5 rounded-[3px] px-2 py-2 text-[13.5px]', idx === active ? 'bg-surface-2 text-fg' : 'text-fg-muted')}
                   >
                     <span className="flex size-5 items-center justify-center text-fg-muted">{item.icon}</span>
                     <span className="flex-1 truncate text-fg">{item.label}</span>
@@ -175,7 +175,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
               );
             })}
           </div>
-          <div className="flex items-center gap-3 border-t border-border px-3 py-2 text-[11px] text-fg-subtle">
+          <div className="flex items-center gap-3 border-t border-border-strong px-3.5 py-2 text-[11px] text-fg-subtle">
             <span className="flex items-center gap-1">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> navigate

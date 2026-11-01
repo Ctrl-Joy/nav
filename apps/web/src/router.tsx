@@ -22,12 +22,16 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', ...page(() => import('./pages/Landing'), 'LandingPage') },
       { path: '/docs', ...page(() => import('./pages/Docs'), 'DocsPage') },
-      { path: '/login', ...page(() => import('./pages/AuthPages'), 'LoginPage') },
-      { path: '/signup', ...page(() => import('./pages/AuthPages'), 'SignupPage') },
+      { path: '/login', ...page(() => import('./pages/auth/AuthPages'), 'LoginPage') },
+      { path: '/signup', ...page(() => import('./pages/auth/AuthPages'), 'SignupPage') },
+      { path: '/sso', ...page(() => import('./pages/auth/AuthPages'), 'SsoPage') },
+      { path: '/forgot-password', ...page(() => import('./pages/auth/AuthPages'), 'ForgotPasswordPage') },
+      { path: '/reset-password', ...page(() => import('./pages/auth/AuthPages'), 'ResetPasswordPage') },
       {
         element: <RequireAuth />,
         children: [
           { path: '/app', ...page(() => import('./pages/AppRedirect'), 'AppRedirect') },
+          { path: '/account', ...page(() => import('./pages/AppRedirect'), 'AccountRedirect') },
           {
             path: '/w/:workspaceId',
             ...page(() => import('./layouts/WorkspaceLayout'), 'WorkspaceLayout'),
@@ -77,6 +81,7 @@ export const router = createBrowserRouter([
               { path: 'activity', ...page(() => import('./pages/Activity'), 'ActivityPage') },
               { path: 'settings', ...page(() => import('./pages/settings/WorkspaceSettings'), 'WorkspaceSettingsPage') },
               { path: 'api-keys', ...page(() => import('./pages/settings/ApiKeys'), 'ApiKeysPage') },
+              { path: 'account', ...page(() => import('./pages/account/AccountSettings'), 'AccountSettingsPage') },
               { path: '*', element: <NotFoundPage /> },
             ],
           },

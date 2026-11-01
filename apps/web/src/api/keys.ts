@@ -7,6 +7,8 @@ export const qk = {
   me: ['me'] as const,
   config: ['config'] as const,
   apiKeys: ['api-keys'] as const,
+  sessions: ['auth', 'sessions'] as const,
+  identities: ['auth', 'identities'] as const,
   workspaces: ['workspaces'] as const,
   branches: (repoUrl: string) => ['git', 'branches', repoUrl] as const,
 

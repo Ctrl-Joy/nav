@@ -29,7 +29,7 @@ export function CopyButton({ value, label = 'Copy', className, size = 'sm' }: { 
 
 export function CodeBlock({ code, title, className, children, wrap }: { code: string; title?: ReactNode; className?: string; children?: ReactNode; wrap?: boolean }) {
   return (
-    <div className={cn('overflow-hidden rounded-lg border border-border bg-[#0a0c0f] text-[#d6dde6]', className)}>
+    <div className={cn('overflow-hidden rounded-[3px] border border-border-strong bg-[#0a0a0a] text-[#d6dde6]', className)}>
       {title !== undefined && (
         <div className="flex items-center justify-between border-b border-white/10 px-3 py-1.5 text-xs text-[#8b95a3]">
           <span className="font-mono">{title}</span>
@@ -52,7 +52,7 @@ export function CodeBlock({ code, title, className, children, wrap }: { code: st
 export function SecretValue({ value, className, mono = true }: { value: string; className?: string; mono?: boolean }) {
   const [shown, setShown] = useState(false);
   return (
-    <div className={cn('flex min-w-0 items-center gap-1 rounded-lg border border-border bg-bg-elevated pl-2.5', className)}>
+    <div className={cn('flex min-w-0 items-center gap-1 rounded-[3px] border border-border-strong bg-transparent pl-2.5', className)}>
       <span className={cn('min-w-0 flex-1 truncate py-1.5 text-[12.5px]', mono && 'font-mono')}>{shown ? value : '•'.repeat(Math.min(24, Math.max(8, value.length)))}</span>
       <IconButton
         label={shown ? 'Hide value' : 'Reveal value'}
@@ -67,7 +67,7 @@ export function SecretValue({ value, className, mono = true }: { value: string; 
 /** Inline value with copy button (non-secret). */
 export function CopyField({ value, className, mono = true }: { value: string; className?: string; mono?: boolean }) {
   return (
-    <div className={cn('flex min-w-0 items-center gap-1 rounded-lg border border-border bg-bg-elevated pl-2.5', className)}>
+    <div className={cn('flex min-w-0 items-center gap-1 rounded-[3px] border border-border-strong bg-transparent pl-2.5', className)}>
       <span className={cn('min-w-0 flex-1 truncate py-1.5 text-[12.5px]', mono && 'font-mono')} title={value}>
         {value}
       </span>

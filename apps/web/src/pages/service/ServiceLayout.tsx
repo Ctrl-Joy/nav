@@ -139,7 +139,7 @@ export function ServiceLayout() {
           <ResourceIcon kind={service.type} className="size-9" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold tracking-tight">{service.name}</h1>
+              <h1 className="truncate text-[24px] leading-tight font-normal tracking-[-0.02em] md:text-[28px]">{service.name}</h1>
               <StatusPill status={service.status} />
               {service.maintenanceMode && <StatusPill status="suspended" label="Maintenance" />}
             </div>

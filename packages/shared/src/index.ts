@@ -49,6 +49,9 @@ export interface User {
   name: string;
   githubLogin: string | null;
   avatarUrl: string | null;
+  /** False for accounts that only sign in through a provider. */
+  hasPassword?: boolean;
+  emailVerified?: boolean;
   createdAt: string;
 }
 

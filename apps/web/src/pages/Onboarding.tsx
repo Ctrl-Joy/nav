@@ -52,17 +52,16 @@ export function Onboarding({ welcome }: { welcome?: boolean }) {
   const doneCount = steps.filter((s) => s.done).length;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="bg-grid pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_60%)]" />
+    <div className="relative overflow-hidden rounded-[3px] border border-border-strong bg-panel">
       <div className="relative px-6 pt-8 pb-6 md:px-10 md:pt-10">
-        <LogoMark className="size-10" />
-        <h2 className="mt-5 text-2xl font-semibold tracking-tight">
+        <LogoMark className="h-8" />
+        <h2 className="mt-5 text-[26px] font-normal tracking-[-0.02em]">
           {welcome ? `Welcome to NAV, ${user.name.split(' ')[0] || 'there'}.` : `Let’s set up ${workspace.name}.`}
         </h2>
         <p className="mt-1.5 max-w-xl text-[14px] text-fg-muted">Three steps to a production-ready stack. You can do them in any order.</p>
         <div className="mt-5 flex items-center gap-3">
           <div className="h-1.5 w-48 overflow-hidden rounded-full bg-surface-3" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={doneCount} aria-label="Setup progress">
-            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneCount / 3) * 100}%` }} />
+            <div className="h-full rounded-full bg-accent-strong transition-all" style={{ width: `${(doneCount / 3) * 100}%` }} />
           </div>
           <span className="font-mono text-xs text-fg-subtle">{doneCount}/3 complete</span>
         </div>
@@ -71,7 +70,7 @@ export function Onboarding({ welcome }: { welcome?: boolean }) {
         {steps.map((s, i) => {
           const meta = RESOURCE_META[s.kind];
           return (
-            <li key={s.kind} className="flex flex-col bg-surface p-6">
+            <li key={s.kind} className="flex flex-col bg-panel p-6">
               <div className="flex items-center gap-3">
                 <span
                   className={cn(

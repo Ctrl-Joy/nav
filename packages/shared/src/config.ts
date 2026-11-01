@@ -33,6 +33,29 @@ export const config = {
     privateKey: (process.env.NAV_GITHUB_APP_PRIVATE_KEY ?? '').replace(/\n/g, '\n'),
     webhookSecret: process.env.NAV_GITHUB_WEBHOOK_SECRET ?? '',
   },
+  /** Extra sign-in providers. Each is enabled when its client id and secret are set. */
+  oauth: {
+    gitlab: {
+      clientId: process.env.NAV_GITLAB_CLIENT_ID ?? '',
+      clientSecret: process.env.NAV_GITLAB_CLIENT_SECRET ?? '',
+      baseUrl: (process.env.NAV_GITLAB_URL ?? 'https://gitlab.com').replace(/\/+$/, ''),
+    },
+    bitbucket: {
+      clientId: process.env.NAV_BITBUCKET_CLIENT_ID ?? '',
+      clientSecret: process.env.NAV_BITBUCKET_CLIENT_SECRET ?? '',
+    },
+    google: {
+      clientId: process.env.NAV_GOOGLE_CLIENT_ID ?? '',
+      clientSecret: process.env.NAV_GOOGLE_CLIENT_SECRET ?? '',
+    },
+  },
+  /** OpenID Connect single sign-on for the listed email domains. */
+  sso: {
+    issuer: (process.env.NAV_SSO_ISSUER ?? '').replace(/\/+$/, ''),
+    clientId: process.env.NAV_SSO_CLIENT_ID ?? '',
+    clientSecret: process.env.NAV_SSO_CLIENT_SECRET ?? '',
+    domains: (process.env.NAV_SSO_DOMAINS ?? '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean),
+  },
   logRetentionDays: int('NAV_LOG_RETENTION_DAYS', 7),
 };
 

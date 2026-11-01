@@ -1,56 +1,136 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
+  BookOpen,
   Boxes,
   Check,
+  ChevronRight,
   ChevronsUpDown,
   Database,
   FileStack,
   FolderKanban,
+  Globe,
   KeyRound,
   LayoutGrid,
   LogOut,
   Menu,
-  Moon,
+  Monitor,
+  Newspaper,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
+  Rocket,
   Search,
   Settings,
-  Sun,
+  UserRound,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import { useConfig, useLogout, useMe } from '@/api/auth';
+import { useDatabase } from '@/api/databases';
 import { useWorkspaceLiveUpdates } from '@/api/live';
+import { useService } from '@/api/services';
 import { useCreateWorkspace } from '@/api/workspaces';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { Logo } from '@/components/Logo';
-import { Button, Dialog, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, Empty, Field, IconButton, Input, Kbd, useToast } from '@/components/ui';
+import { LogoMark } from '@/components/Logo';
+import { Button, Dialog, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator, Empty, Field, Input, Kbd, useToast } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { LAST_WORKSPACE_KEY, writeLocal } from '@/lib/misc';
-import { useTheme } from '@/lib/theme';
+import { setTheme, useTheme } from '@/lib/theme';
 import { CommandPalette } from './CommandPalette';
 import { NewMenu } from './NewMenu';
 import { FullPageSpinner } from './RootLayout';
 import { roleCaps, WorkspaceContext, type WorkspaceCtx } from './WorkspaceContext';
 
-const NAV = [
-  { to: '', label: 'Overview', icon: LayoutGrid, end: true },
-  { to: 'projects', label: 'Projects', icon: FolderKanban },
-  { to: 'databases', label: 'Postgres', icon: Database },
-  { to: 'env-groups', label: 'Env Groups', icon: Boxes },
-  { to: 'blueprints', label: 'Blueprints', icon: FileStack },
-  { to: 'activity', label: 'Activity', icon: Activity },
-  { to: 'settings', label: 'Settings', icon: Settings },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+}
+
+const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
+  {
+    items: [
+      { to: '', label: 'Overview', icon: LayoutGrid, end: true },
+      { to: 'projects', label: 'Projects', icon: FolderKanban },
+      { to: 'blueprints', label: 'Blueprints', icon: FileStack },
+      { to: 'env-groups', label: 'Environment Groups', icon: Boxes },
+    ],
+  },
+  { label: 'Data', items: [{ to: 'databases', label: 'Postgres', icon: Database }] },
+  { label: 'Activity', items: [{ to: 'activity', label: 'Events', icon: Activity }] },
+  {
+    label: 'Workspace',
+    items: [
+      { to: 'api-keys', label: 'API Keys', icon: KeyRound },
+      { to: 'settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ];
+
+/** Breadcrumb label + icon for the first path segment under /w/:ws. */
+const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
+  '': { label: 'Overview', icon: LayoutGrid },
+  projects: { label: 'Projects', icon: FolderKanban },
+  blueprints: { label: 'Blueprints', icon: FileStack },
+  'env-groups': { label: 'Environment Groups', icon: Boxes },
+  databases: { label: 'Postgres', icon: Database },
+  activity: { label: 'Events', icon: Activity },
+  'api-keys': { label: 'API Keys', icon: KeyRound },
+  settings: { label: 'Workspace settings', icon: Settings },
+  account: { label: 'Account settings', icon: UserRound },
+  services: { label: 'Services', icon: Globe },
+  new: { label: 'New service', icon: Plus },
+  'get-started': { label: 'Get started', icon: Rocket },
+};
+
+const COLLAPSE_KEY = 'nav.sidebar.collapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(v: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0');
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 function initials(name: string): string {
   return (
     name
       .split(/[\s@._-]+/)
       .filter(Boolean)
-      .slice(0, 2)
+      .slice(0, 1)
       .map((p) => p[0]?.toUpperCase())
       .join('') || 'N'
+  );
+}
+
+/** Stable pastel colour for an initial avatar. */
+function pastel(seed: string): string {
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 80% 82%)`;
+}
+
+function InitialAvatar({ name, src, className }: { name: string; src?: string | null; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full text-[11px] font-semibold text-[#111]', className)}
+      style={{ background: pastel(name) }}
+    >
+      {src ? <img src={src} alt="" className="size-full object-cover" /> : initials(name)}
+    </span>
   );
 }
 
@@ -93,84 +173,116 @@ function CreateWorkspaceDialog({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-function Sidebar({ ctx, onNavigate, onCreateWorkspace }: { ctx: WorkspaceCtx; onNavigate?: () => void; onCreateWorkspace: () => void }) {
+function WorkspaceSwitcher({ ctx, onNavigate, onCreateWorkspace, className }: { ctx: WorkspaceCtx; onNavigate?: () => void; onCreateWorkspace: () => void; className?: string }) {
   const navigate = useNavigate();
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-14 items-center px-4">
-        <Link to={`/w/${ctx.ws}`} onClick={onNavigate} className="rounded-md">
-          <Logo />
-        </Link>
-      </div>
-      <div className="px-3 pb-3">
-        <Dropdown
-          className="w-full"
-          width="w-64"
-          trigger={(p) => (
-            <button
-              {...p}
-              type="button"
-              className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-left hover:border-border-strong"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent-soft font-mono text-[11px] font-semibold text-accent">
-                {initials(ctx.workspace.name)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-fg">{ctx.workspace.name}</span>
-                <span className="block text-[11px] text-fg-subtle capitalize">{ctx.role}</span>
-              </span>
-              <ChevronsUpDown className="size-3.5 text-fg-subtle" />
-            </button>
-          )}
+    <Dropdown
+      className={cn('h-full', className)}
+      width="w-64"
+      trigger={(p) => (
+        <button
+          {...p}
+          type="button"
+          aria-label={`Workspace: ${ctx.workspace.name}. Switch workspace`}
+          className={cn('flex h-full w-full min-w-0 items-center gap-2.5 px-3.5 text-left transition-colors hover:bg-surface-2', p.open && 'bg-surface-2')}
         >
-          <DropdownLabel>Workspaces</DropdownLabel>
-          {ctx.workspaces.map((w) => (
-            <DropdownItem
-              key={w.id}
-              icon={w.id === ctx.ws ? <Check className="size-3.5 text-accent" /> : <span />}
-              onSelect={() => {
-                onNavigate?.();
-                navigate(`/w/${w.id}`);
-              }}
-              hint={<span className="capitalize">{w.role}</span>}
-            >
-              {w.name}
-            </DropdownItem>
-          ))}
-          <DropdownSeparator />
-          <DropdownItem icon={<Plus className="size-3.5" />} onSelect={onCreateWorkspace}>
-            Create workspace
-          </DropdownItem>
-        </Dropdown>
-      </div>
-      <nav aria-label="Workspace" className="flex-1 space-y-0.5 overflow-y-auto px-3">
-        {NAV.map((n) => (
-          <NavLink
-            key={n.label}
-            to={`/w/${ctx.ws}${n.to ? `/${n.to}` : ''}`}
-            end={n.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                'flex h-8 items-center gap-2.5 rounded-[10px] border px-2.5 text-[13px] font-medium',
-                isActive ? 'nv-active' : 'border-transparent text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <n.icon className={cn('size-4', isActive ? 'text-white' : 'text-fg-subtle')} strokeWidth={1.75} />
-                {n.label}
-              </>
-            )}
-          </NavLink>
+          <InitialAvatar name={ctx.workspace.name} className="size-[22px]" />
+          <span className="min-w-0 flex-1 truncate text-[14px] text-fg">{ctx.workspace.name}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-fg-muted" />
+        </button>
+      )}
+    >
+      <DropdownLabel>Workspaces</DropdownLabel>
+      {ctx.workspaces.map((w) => (
+        <DropdownItem
+          key={w.id}
+          icon={w.id === ctx.ws ? <Check className="size-4 text-accent" /> : <span />}
+          onSelect={() => {
+            onNavigate?.();
+            navigate(`/w/${w.id}`);
+          }}
+          hint={<span className="capitalize">{w.role}</span>}
+        >
+          {w.name}
+        </DropdownItem>
+      ))}
+      <DropdownSeparator />
+      <DropdownItem icon={<Plus className="size-4" />} onSelect={onCreateWorkspace}>
+        Create workspace
+      </DropdownItem>
+    </Dropdown>
+  );
+}
+
+const rowClass = (collapsed: boolean) =>
+  cn('flex h-[34px] w-full items-center gap-2.5 text-[14px] transition-colors', collapsed ? 'justify-center px-0' : 'px-3');
+
+function Sidebar({
+  ctx,
+  collapsed = false,
+  onToggleCollapse,
+  onNavigate,
+}: {
+  ctx: WorkspaceCtx;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  onNavigate?: () => void;
+}) {
+  const bottomLink = cn(rowClass(collapsed), 'h-[31px] text-[13px] text-fg-muted hover:bg-surface-2 hover:text-fg');
+  return (
+    <div className="flex h-full flex-col">
+      <nav aria-label="Workspace" className="flex-1 overflow-y-auto py-3">
+        {NAV_GROUPS.map((g, gi) => (
+          <div key={g.label ?? gi} className={cn(gi > 0 && (collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5'))}>
+            {g.label && !collapsed && <div className="nv-label px-3 pb-2">{g.label}</div>}
+            <ul>
+              {g.items.map((n) => (
+                <li key={n.label}>
+                  <NavLink
+                    to={`/w/${ctx.ws}${n.to ? `/${n.to}` : ''}`}
+                    end={n.end}
+                    onClick={onNavigate}
+                    title={collapsed ? n.label : undefined}
+                    aria-label={collapsed ? n.label : undefined}
+                    className={({ isActive }) => cn(rowClass(collapsed), isActive ? 'nv-active' : 'text-fg hover:bg-surface-2')}
+                  >
+                    <n.icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    {!collapsed && <span className="truncate">{n.label}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
       </nav>
-      <div className="border-t border-border p-3 text-[11px] text-fg-subtle">
-        <div className="flex items-center justify-between">
-          <span>NAV {ctx.config?.version ? `v${ctx.config.version}` : ''}</span>
-          {ctx.config?.driver && <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono">{ctx.config.driver}</span>}
-        </div>
+      <div className="border-t border-border py-2">
+        <Link to="/docs" onClick={onNavigate} className={bottomLink} title={collapsed ? 'Docs' : undefined} aria-label={collapsed ? 'Docs' : undefined}>
+          <BookOpen className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          {!collapsed && 'Docs'}
+        </Link>
+        <a href="/#changelog" className={bottomLink} title={collapsed ? 'Changelog' : undefined} aria-label={collapsed ? 'Changelog' : undefined}>
+          <Newspaper className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+          {!collapsed && 'Changelog'}
+        </a>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className={bottomLink}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expand' : undefined}
+          >
+            {collapsed ? <PanelLeftOpen className="size-4 shrink-0" strokeWidth={1.75} /> : <PanelLeftClose className="size-4 shrink-0" strokeWidth={1.75} />}
+            {!collapsed && 'Collapse'}
+          </button>
+        )}
+        {!collapsed && (
+          <div className="flex items-center justify-between px-3 pt-2 font-mono text-[10.5px] text-fg-subtle">
+            <span>NAV {ctx.config?.version ? `v${ctx.config.version}` : ''}</span>
+            {ctx.config?.driver && <span>{ctx.config.driver}</span>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -179,43 +291,153 @@ function Sidebar({ ctx, onNavigate, onCreateWorkspace }: { ctx: WorkspaceCtx; on
 function UserMenu({ ctx }: { ctx: WorkspaceCtx }) {
   const logout = useLogout();
   const navigate = useNavigate();
-  const [theme, toggle] = useTheme();
+  const [theme] = useTheme();
+  const [themeOpen, setThemeOpen] = useState(false);
+  const themeBtn = useRef<HTMLButtonElement>(null);
+  const displayName = ctx.user.name || ctx.user.email;
   return (
     <Dropdown
       align="end"
       width="w-64"
+      className="h-full"
       trigger={(p) => (
-        <button {...p} type="button" aria-label="Account menu" className="flex size-8 items-center justify-center overflow-hidden rounded-full border border-border bg-surface-2 text-[11px] font-semibold text-fg">
-          {ctx.user.avatarUrl ? <img src={ctx.user.avatarUrl} alt="" className="size-full object-cover" /> : initials(ctx.user.name || ctx.user.email)}
+        <button
+          {...p}
+          onClick={() => {
+            setThemeOpen(false);
+            p.onClick();
+          }}
+          type="button"
+          aria-label="Account menu"
+          className={cn('flex h-full items-center px-3 transition-colors hover:bg-surface-2 min-[900px]:px-3.5', p.open && 'bg-surface-2')}
+        >
+          <InitialAvatar name={displayName} src={ctx.user.avatarUrl} className="size-[22px]" />
         </button>
       )}
     >
-      <div className="px-2 py-1.5">
-        <div className="truncate text-[13px] font-medium text-fg">{ctx.user.name}</div>
-        <div className="truncate text-xs text-fg-subtle">{ctx.user.email}</div>
+      <div className="flex items-start gap-2.5 px-2 pt-1.5 pb-2.5">
+        <InitialAvatar name={displayName} src={ctx.user.avatarUrl} className="mt-0.5 size-5 text-[10px]" />
+        <div className="min-w-0">
+          <div className="truncate text-[13.5px] font-semibold text-fg">{ctx.user.name || 'Account'}</div>
+          <div className="truncate text-xs text-fg-muted">{ctx.user.email}</div>
+        </div>
+      </div>
+      <DropdownItem icon={<Settings className="size-4" strokeWidth={1.75} />} to={`/w/${ctx.ws}/account`}>
+        Account settings
+      </DropdownItem>
+      <div
+        className="relative"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' && themeOpen) {
+            e.stopPropagation();
+            setThemeOpen(false);
+            themeBtn.current?.focus();
+          }
+        }}
+      >
+        <button
+          ref={themeBtn}
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          aria-haspopup="menu"
+          aria-expanded={themeOpen}
+          onClick={() => setThemeOpen((o) => !o)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.stopPropagation();
+              setThemeOpen(true);
+              requestAnimationFrame(() => (document.querySelector('[data-theme-option]') as HTMLElement | null)?.focus());
+            }
+          }}
+          className={cn(
+            'flex w-full items-center gap-2.5 rounded-[3px] px-2 py-2 text-left text-[13.5px] text-fg outline-none hover:bg-surface-2 focus:bg-surface-2',
+            themeOpen && 'bg-surface-2',
+          )}
+        >
+          <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+            <Monitor className="size-4" strokeWidth={1.75} />
+          </span>
+          <span className="flex-1">Theme</span>
+          <ChevronRight className={cn('size-4 text-fg-muted transition-transform', themeOpen && 'rotate-90 sm:rotate-0')} />
+        </button>
+        {themeOpen && (
+          <div
+            role="menu"
+            aria-label="Theme"
+            className="py-1 pl-6 sm:absolute sm:top-0 sm:right-full sm:mr-2 sm:w-40 sm:rounded-[3px] sm:border sm:border-border-strong sm:bg-popover sm:p-1.5 sm:shadow-pop"
+          >
+            {(['dark', 'light'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="menuitemradio"
+                aria-checked={theme === t}
+                data-theme-option
+                onClick={() => setTheme(t)}
+                className="flex w-full items-center gap-2.5 rounded-[3px] px-2 py-2 text-left text-[13.5px] text-fg outline-none hover:bg-surface-2 focus:bg-surface-2"
+              >
+                <span className="flex size-4 items-center justify-center">{theme === t && <Check className="size-4 text-accent" />}</span>
+                {t === 'dark' ? 'Dark' : 'Light'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <DropdownSeparator />
-      <DropdownItem icon={<KeyRound className="size-3.5" />} to={`/w/${ctx.ws}/api-keys`}>
-        API keys
-      </DropdownItem>
-      <DropdownItem icon={<Settings className="size-3.5" />} to={`/w/${ctx.ws}/settings`}>
-        Workspace settings
-      </DropdownItem>
-      <DropdownItem icon={theme === 'dark' ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />} onSelect={toggle}>
-        {theme === 'dark' ? 'Light theme' : 'Dark theme'}
-      </DropdownItem>
-      <DropdownSeparator />
       <DropdownItem
-        icon={<LogOut className="size-3.5" />}
+        icon={<LogOut className="size-4" strokeWidth={1.75} />}
         onSelect={async () => {
           await logout.mutateAsync().catch(() => undefined);
           navigate('/login');
         }}
       >
-        Log out
+        Sign out
       </DropdownItem>
     </Dropdown>
   );
+}
+
+function Breadcrumb({ ws }: { ws: string }) {
+  const { pathname } = useLocation();
+  const parts = pathname.split('/').filter(Boolean); // ['w', ws, section, id?, ...]
+  const section = parts[2] ?? '';
+  const id = parts[3];
+  const def = SECTIONS[section] ?? SECTIONS[''];
+  const serviceId = section === 'services' && id ? id : undefined;
+  const databaseId = section === 'databases' && id && id !== 'new' ? id : undefined;
+  const service = useService(serviceId);
+  const database = useDatabase(databaseId);
+  const leaf = serviceId ? service.data?.name : databaseId ? database.data?.name : undefined;
+  const Icon = def.icon;
+  const sectionHref = section === 'services' ? `/w/${ws}` : `/w/${ws}${section ? `/${section}` : ''}`;
+  return (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 px-4 text-[13.5px] text-fg-muted min-[900px]:px-6">
+      <Icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
+      {leaf ? (
+        <>
+          <Link to={sectionHref} className="hidden truncate hover:text-fg sm:inline">
+            {def.label}
+          </Link>
+          <span aria-hidden className="hidden text-fg-subtle sm:inline">
+            /
+          </span>
+          <span className="truncate text-fg" aria-current="page">
+            {leaf}
+          </span>
+        </>
+      ) : (
+        <span className="truncate" aria-current="page">
+          {section === 'new' && parts[3] ? `New ${parts[3]}` : def.label}
+        </span>
+      )}
+    </nav>
+  );
+}
+
+function BarCell({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('flex h-full items-center border-l border-border', className)}>{children}</div>;
 }
 
 export function WorkspaceLayout() {
@@ -226,6 +448,7 @@ export function WorkspaceLayout() {
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
   const [createWs, setCreateWs] = useState(false);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const liveState = useWorkspaceLiveUpdates(workspaceId || undefined);
 
   const ctx = useMemo<WorkspaceCtx | null>(() => {
@@ -253,6 +476,15 @@ export function WorkspaceLayout() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawer(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawer]);
+
   if (me.isPending) return <FullPageSpinner />;
   if (!ctx) {
     return (
@@ -262,7 +494,7 @@ export function WorkspaceLayout() {
           title="Workspace not found"
           description="It may have been deleted, or you are not a member of it."
           action={
-            <Link className="text-[13px] font-medium text-accent hover:underline" to="/app">
+            <Link className="text-[13px] font-medium text-link hover:underline" to="/app">
               Go to my workspaces
             </Link>
           }
@@ -272,62 +504,119 @@ export function WorkspaceLayout() {
   }
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const toggleCollapse = () =>
+    setCollapsed((c) => {
+      writeCollapsed(!c);
+      return !c;
+    });
 
   return (
     <WorkspaceContext.Provider value={ctx}>
-      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:rounded-md focus:bg-accent focus:px-3 focus:py-1.5 focus:text-accent-fg">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[200] focus:bg-primary focus:px-3 focus:py-1.5 focus:text-primary-fg">
         Skip to content
       </a>
-      <div className="flex min-h-dvh bg-bg">
-        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-border bg-bg-elevated md:block">
-          <Sidebar ctx={ctx} onCreateWorkspace={() => setCreateWs(true)} />
-        </aside>
-
-        {drawer && (
-          <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
-            <div className="absolute inset-0 animate-fade-in bg-black/50" onClick={() => setDrawer(false)} />
-            <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] animate-slide-up border-r border-border bg-bg-elevated shadow-pop">
-              <IconButton label="Close navigation" className="absolute top-3.5 right-3" icon={<X className="size-4" />} onClick={() => setDrawer(false)} />
-              <Sidebar ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} />
-            </aside>
+      <div className="flex min-h-dvh flex-col bg-bg">
+        <header className="sticky top-0 z-40 flex h-[46px] shrink-0 items-stretch border-b border-border bg-bg">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            aria-expanded={drawer}
+            onClick={() => setDrawer(true)}
+            className="flex w-[46px] shrink-0 items-center justify-center border-r border-border text-fg hover:bg-surface-2 min-[900px]:hidden"
+          >
+            <Menu className="size-4" />
+          </button>
+          <Link
+            to={`/w/${ctx.ws}`}
+            aria-label="NAV home"
+            className="hidden w-[46px] shrink-0 items-center justify-center border-r border-border hover:bg-surface-2 min-[900px]:flex"
+          >
+            <LogoMark className="h-[15px]" />
+          </Link>
+          <div className="hidden w-[194px] shrink-0 border-r border-border min-[900px]:block">
+            <WorkspaceSwitcher ctx={ctx} onCreateWorkspace={() => setCreateWs(true)} className="w-full" />
           </div>
-        )}
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b border-border bg-bg/85 px-4 backdrop-blur md:px-6">
-            <IconButton label="Open navigation" className="md:hidden" icon={<Menu className="size-4" />} onClick={() => setDrawer(true)} />
-            <button
-              type="button"
-              onClick={() => setPalette(true)}
-              className="flex h-8 w-full max-w-sm items-center gap-2 rounded-lg border border-border bg-surface px-2.5 text-[13px] text-fg-subtle transition-colors hover:border-border-strong"
+          <Breadcrumb ws={ctx.ws} />
+          <div className="ml-auto flex h-full items-stretch">
+            <span
+              className="hidden items-center px-3 lg:flex"
+              title={liveState === 'open' ? 'Live updates connected' : 'Live updates reconnecting'}
             >
-              <Search className="size-3.5" />
-              <span className="flex-1 truncate text-left">Search or jump to…</span>
-              <span className="hidden items-center gap-0.5 sm:flex">
-                <Kbd>{isMac ? '⌘' : 'Ctrl'}</Kbd>
-                <Kbd>K</Kbd>
-              </span>
-            </button>
-            <div className="ml-auto flex items-center gap-2">
-              <span
-                className="hidden items-center gap-1.5 text-[11px] text-fg-subtle lg:flex"
-                title={liveState === 'open' ? 'Live updates connected' : 'Live updates reconnecting'}
+              <span className={cn('size-1.5 rounded-full', liveState === 'open' ? 'bg-success' : 'animate-pulse-dot bg-warning')} />
+              <span className="sr-only">{liveState === 'open' ? 'Live updates connected' : 'Live updates reconnecting'}</span>
+            </span>
+            <BarCell className="border-l-0 min-[900px]:border-l-0">
+              <button
+                type="button"
+                onClick={() => setPalette(true)}
+                aria-label="Search"
+                className="flex h-full items-center gap-2 px-3 text-[13.5px] text-fg transition-colors hover:bg-surface-2 min-[900px]:px-4"
               >
-                <span className={cn('size-1.5 rounded-full', liveState === 'open' ? 'bg-success' : 'animate-pulse-dot bg-warning')} />
-                {liveState === 'open' ? 'Live' : 'Reconnecting'}
-              </span>
-              {ctx.canWrite && (
-                <div className="hidden sm:block">
-                  <NewMenu ws={ctx.ws} size="sm" />
-                </div>
-              )}
+                <Search className="size-4" strokeWidth={1.75} />
+                <span className="hidden sm:inline">Search</span>
+                <span className="hidden items-center gap-0.5 sm:flex">
+                  <Kbd>{isMac ? '⌘' : '⌃'}</Kbd>
+                  <Kbd>K</Kbd>
+                </span>
+              </button>
+            </BarCell>
+            {ctx.canWrite && (
+              <BarCell>
+                <NewMenu ws={ctx.ws} bar />
+              </BarCell>
+            )}
+            <BarCell className="hidden sm:flex">
+              <Link to="/docs" aria-label="Help and documentation" title="Help and documentation" className="flex h-full items-center px-4 text-[14px] text-fg hover:bg-surface-2">
+                ?
+              </Link>
+            </BarCell>
+            <BarCell>
               <UserMenu ctx={ctx} />
+            </BarCell>
+          </div>
+        </header>
+
+        <div className="flex min-h-0 flex-1">
+          <aside
+            className={cn(
+              'sticky top-[46px] hidden h-[calc(100dvh-46px)] shrink-0 border-r border-border bg-bg min-[900px]:block',
+              collapsed ? 'w-14' : 'w-60',
+            )}
+          >
+            <Sidebar ctx={ctx} collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+          </aside>
+
+          {drawer && (
+            <div className="fixed inset-0 z-50 min-[900px]:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+              <div className="absolute inset-0 animate-fade-in bg-black/60" onClick={() => setDrawer(false)} />
+              <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-bg">
+                <div className="flex h-[46px] shrink-0 items-stretch border-b border-border">
+                  <div className="min-w-0 flex-1">
+                    <WorkspaceSwitcher ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} className="w-full" />
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Close navigation"
+                    onClick={() => setDrawer(false)}
+                    className="flex w-[46px] shrink-0 items-center justify-center border-l border-border text-fg hover:bg-surface-2"
+                    autoFocus
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <Sidebar ctx={ctx} onNavigate={() => setDrawer(false)} />
+                </div>
+              </aside>
             </div>
-          </header>
-          <main id="main" className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-6 md:px-8 md:py-8">
-            <ErrorBoundary resetKey={location.pathname}>
-              <Outlet />
-            </ErrorBoundary>
+          )}
+
+          <main id="main" className="min-w-0 flex-1 px-4 py-6 min-[900px]:px-10 min-[900px]:py-10">
+            <div className="mx-auto w-full max-w-[1200px]">
+              <ErrorBoundary resetKey={location.pathname}>
+                <Outlet />
+              </ErrorBoundary>
+            </div>
           </main>
         </div>
       </div>

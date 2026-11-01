@@ -1,856 +1,498 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  Boxes, Clock, Cpu, Database, FileCode2, Globe, HardDrive, KeyRound, Layers,
-  Lock, Network, Radio, ScrollText, Shield, ShieldCheck, Terminal, Users, Webhook, Zap,
+  AlarmClock, ArrowRight, ArrowUp, Box, Check, CheckCircle2, ChevronRight, Container, Cpu,
+  Database, FileCode2, Fingerprint, GitBranch, Globe, HardDrive, Hexagon, Layers, Lock,
+  Menu, Network, Plus, Search, Server, Terminal, Users, Webhook, Workflow, X,
 } from 'lucide-react';
-import { DATABASE_PLANS, SERVICE_PLANS, type Plan } from '@nav/shared';
+import { SERVICE_PLANS } from '@nav/shared';
 import { useMe } from '@/api/auth';
-import { LogoMark } from '@/components/Logo';
+import { Github } from '@/components/GithubIcon';
+import { Logo, LogoMark } from '@/components/Logo';
 import { formatMemory } from '@/lib/format';
 import { useTitle } from '@/lib/useTitle';
-import './landing.css';
+import { Story } from './landing/Story';
+import './landing/kivo.css';
 
-/* Background loop + its own first frame as poster (supplied with the design brief). */
-const ART_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260912_104303_0c6d60b2-9353-408e-9449-585108a22fb5.mp4';
-const ART_POSTER = 'https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/130837c4-0244-4f37-9c61-8d801d93fd29.jpg';
+type Icon = typeof Globe | typeof Github;
 
-const doc = (slug: string) => `/docs#${slug}`;
-type Icon = typeof Globe;
+const TYPED = ['web services', 'background workers', 'cron jobs', 'Postgres', 'static sites'];
 
-// ---- Navigation data ---------------------------------------------------------------------------
-const PRODUCT_SERVICES: { icon: Icon; title: string; body: string; slug: string }[] = [
-  { icon: Globe, title: 'Web Services', body: 'Public HTTP apps with TLS and zero-downtime deploys', slug: 'web-services' },
-  { icon: Network, title: 'Private Services', body: 'Internal APIs reachable only on the private network', slug: 'private-services' },
-  { icon: Cpu, title: 'Background Workers', body: 'Long-running processes that consume queues', slug: 'background-workers' },
-  { icon: Clock, title: 'Cron Jobs', body: 'Scheduled commands with full run history', slug: 'cron-jobs' },
-  { icon: Layers, title: 'Static Sites', body: 'Built once, served from the edge with caching', slug: 'static-sites' },
-  { icon: Database, title: 'NAV Postgres', body: 'Managed PostgreSQL with backups and restore', slug: 'postgres' },
-];
-const PRODUCT_FEATURES: [string, string][] = [
-  ['Preview Environments', 'preview-environments'],
-  ['Infrastructure as Code', 'infrastructure-as-code'],
-  ['Zero-Downtime Deploys', 'deploys'],
-  ['Autoscaling', 'scaling'],
-  ['Private Networking', 'private-network'],
-  ['Persistent Disks', 'persistent-disks'],
-  ['NAV CLI', 'cli'],
-  ['REST API', 'rest-api'],
-];
-const SOLUTIONS: { title: string; links: [string, string][] }[] = [
-  { title: 'Use cases', links: [['SaaS backends', 'web-services'], ['AI agents & workers', 'background-workers'], ['Internal tools', 'private-services'], ['Scheduled data jobs', 'cron-jobs']] },
-  { title: 'By team', links: [['Startups', 'getting-started'], ['Platform teams', 'self-hosting'], ['Security-minded teams', 'security']] },
-  { title: 'Migrate', links: [['Move a Dockerfile app', 'docker'], ['Bring a nav.yaml', 'infrastructure-as-code'], ['Self-hosting guide', 'self-hosting']] },
-];
-const RESOURCES: [string, string][] = [
-  ['Documentation', 'getting-started'],
-  ['Framework quickstarts', 'quickstarts'],
-  ['Changelog', 'changelog'],
-  ['CLI reference', 'cli'],
-  ['REST API', 'rest-api'],
-  ['FAQ', 'faq'],
+/** Illustrative services for the hero board (UI mock, not live data). */
+const BOARD: { name: string; kind: string; icon: Icon; metric: string; value: string; pts: number[] }[] = [
+  { name: 'api', kind: 'Web service', icon: Globe, metric: 'Requests', value: '1.2k/m', pts: [14, 20, 12, 22, 16, 24, 15, 21, 26, 18, 24] },
+  { name: 'queue-worker', kind: 'Background worker', icon: Workflow, metric: 'Jobs', value: '640/m', pts: [18, 12, 20, 9, 16, 22, 12, 18, 10, 20, 14] },
+  { name: 'main-db', kind: 'Postgres', icon: Database, metric: 'Storage', value: '2.4 GB', pts: [6, 8, 9, 11, 12, 14, 16, 17, 19, 21, 23] },
+  { name: 'docs-site', kind: 'Static site', icon: Layers, metric: 'Bandwidth', value: '3.1 GB', pts: [10, 16, 13, 20, 14, 12, 22, 17, 24, 15, 21] },
 ];
 
-const STACK = [
-  ['JS', 'Node.js'], ['Py', 'Python'], ['Go', 'Go'], ['Rb', 'Ruby'], ['Bn', 'Bun'], ['🐳', 'Docker'], ['N', 'Next.js'], ['Dj', 'Django'],
-  ['Fa', 'FastAPI'], ['Ex', 'Express'], ['Ra', 'Rails'], ['Fl', 'Flask'], ['Vi', 'Vite'], ['As', 'Astro'], ['PG', 'Postgres'], ['Gn', 'Gin'],
-] as const;
-
-const BUILDER_TILES: { icon: Icon; title: string; body: string; soon?: boolean }[] = [
-  { icon: Terminal, title: 'Native language runtimes', body: 'Node, Bun, Python, Go and Ruby detected and built without a Dockerfile.' },
-  { icon: FileCode2, title: 'Infrastructure as code', body: 'Describe services, databases and env groups in one versioned nav.yaml.' },
-  { icon: Boxes, title: 'Isolated environments', body: 'Projects and environments keep staging and production apart.' },
-  { icon: HardDrive, title: 'Persistent disks', body: 'Attach durable storage to a service that survives every deploy.' },
-  { icon: KeyRound, title: 'Env groups & secret files', body: 'Share configuration across services; encrypted at rest.' },
-  { icon: Radio, title: 'WebSockets', body: 'Long-lived, bidirectional connections pass straight through the edge.' },
-  { icon: Zap, title: 'Edge caching for static sites', body: 'ETags, immutable asset caching and compression out of the box.' },
-  { icon: Lock, title: 'Fully-managed TLS', body: 'Certificates issue and renew automatically for every custom domain.' },
+const BAND: [Icon, string][] = [
+  [Hexagon, 'Node.js'], [Terminal, 'Python'], [Box, 'Go'], [Cpu, 'Bun'], [Container, 'Docker'], [Database, 'Postgres'],
+  [GitBranch, 'Git'], [Lock, 'TLS'], [Webhook, 'Hooks'], [AlarmClock, 'Cron'], [Network, 'Private'], [FileCode2, 'nav.yaml'],
 ];
 
-const SECURITY_TILES: { icon: Icon; title: string; body: string }[] = [
-  { icon: Network, title: 'Private networking', body: 'Service-to-service traffic stays on an internal network, never the internet.' },
-  { icon: Shield, title: 'Container isolation', body: 'Per-plan CPU and memory limits, dropped capabilities, no-new-privileges.' },
-  { icon: Users, title: 'Role-based access', body: 'Owner, admin, developer and viewer roles on every workspace.' },
-  { icon: ScrollText, title: 'Activity log', body: 'Every deploy, scale, env change and domain event is recorded.' },
-  { icon: ShieldCheck, title: 'Encryption at rest', body: 'AES-256-GCM for env vars, secret files, database passwords and TLS keys.' },
-  { icon: Webhook, title: 'Signed webhooks', body: 'GitHub deliveries verified with HMAC-SHA256; deploy hooks use random keys.' },
+const SECURITY: { icon: Icon; title: string; body: string }[] = [
+  { icon: Container, title: 'Hardened containers', body: 'Dropped capabilities plus CPU, memory and process limits.' },
+  { icon: Lock, title: 'Scrubbed environments', body: 'Instances start with only their own variables.' },
+  { icon: Webhook, title: 'Verified webhooks', body: 'GitHub signatures checked in constant time.' },
+  { icon: Fingerprint, title: 'Hashed passwords', body: 'Stored as scrypt hashes, never in plain text.' },
+  { icon: Users, title: 'Workspace roles', body: 'Each member’s role decides what they can change.' },
+  { icon: Network, title: 'Private by default', body: 'No public route unless you add one.' },
 ];
 
-// ---- Small visuals ---------------------------------------------------------------------------------
-function Spark({ seed, color = '#a8ccfc' }: { seed: number; color?: string }) {
-  const pts = Array.from({ length: 24 }, (_, i) => {
-    const y = 15 + Math.sin(i * 0.7 + seed) * 6 + Math.sin(i * 1.9 + seed * 2) * 4;
-    return `${(i / 23) * 100},${y.toFixed(1)}`;
-  });
+const FAQ: [string, string][] = [
+  ['Where does NAV run?', 'On machines you control. The control plane, agent and edge proxy are plain Node processes backed by one Postgres database.'],
+  ['What can I deploy?', 'Web services, static sites, background workers, cron jobs, private services and Postgres databases, from Git or a Dockerfile.'],
+  ['How do deploys stay zero-downtime?', 'A new instance has to pass its health check first. The edge then moves traffic over and only afterwards stops the old instance.'],
+  ['Do I need Docker?', 'No. The agent can run instances as hardened Docker containers or as supervised processes, depending on the host.'],
+  ['How do rollbacks work?', 'Every successful build is kept. Choose an earlier deploy in the dashboard or run nav rollback, and that exact artifact is redeployed.'],
+  ['Can I keep infrastructure in code?', 'Yes. A nav.yaml blueprint declares services, databases and env groups, and NAV syncs them when the file changes.'],
+];
+
+function sparkPath(pts: number[], w = 200, h = 30) {
+  const max = Math.max(...pts);
+  return pts.map((p, i) => `${i ? 'L' : 'M'}${((i / (pts.length - 1)) * w).toFixed(1)} ${(h - (p / max) * h).toFixed(1)}`).join(' ');
+}
+
+function useReveal(root: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const els = root.current?.querySelectorAll('.k-rv');
+    if (!els?.length) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [root]);
+}
+
+/** Types and deletes the rotating hero phrase. */
+function useTyped(words: string[]) {
+  const [text, setText] = useState(words[0]);
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let i = 0;
+    let n = words[0].length;
+    let deleting = false;
+    let t = 0;
+    const tick = () => {
+      const w = words[i];
+      if (!deleting && n === w.length) { deleting = true; t = window.setTimeout(tick, 2200); return; }
+      if (deleting && n === 0) { deleting = false; i = (i + 1) % words.length; t = window.setTimeout(tick, 260); return; }
+      n += deleting ? -1 : 1;
+      setText(words[i].slice(0, n));
+      t = window.setTimeout(tick, deleting ? 38 : 75);
+    };
+    t = window.setTimeout(tick, 1800);
+    return () => window.clearTimeout(t);
+  }, [words]);
+  return text;
+}
+
+function useInterval(fn: () => void, ms: number) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const id = window.setInterval(() => ref.current(), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+}
+
+function Cross() {
   return (
-    <svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
-      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <>
+      <span className="k-cross l" aria-hidden="true" />
+      <span className="k-cross r" aria-hidden="true" />
+    </>
   );
 }
 
-function Chev() {
+function HeroBoard() {
+  const [busy, setBusy] = useState<number | null>(null);
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => { const t = window.setTimeout(() => setDrawn(true), 300); return () => window.clearTimeout(t); }, []);
+  const order = useRef(0);
+  useInterval(() => {
+    const i = order.current++ % BOARD.length;
+    setBusy(i);
+    window.setTimeout(() => setBusy((b) => (b === i ? null : b)), 1700);
+  }, 4200);
   return (
-    <svg className="nv-chev" viewBox="0 0 11 20" aria-hidden="true">
-      <path d="M1.15 1.15 L9.6 10 L1.15 18.85" />
-    </svg>
-  );
-}
-
-function Caret() {
-  return (
-    <svg className="nl-caret" viewBox="0 0 9 6" aria-hidden="true">
-      <path d="M0.7 1.1 L4.5 4.6 L8.3 1.1" />
-    </svg>
-  );
-}
-
-function ServiceCard({ name, icon: I, metrics }: { name: string; icon: Icon; metrics: [string, string][] }) {
-  return (
-    <div className="nl-svc">
-      <div className="nl-svc-top">
-        <span>
-          <I strokeWidth={1.6} /> {name}
-        </span>
-        <span className="nl-avail">✓ Available</span>
-      </div>
-      <div className="nl-sparks">
-        {metrics.map(([label, color], i) => (
-          <div key={label} className="nl-spark">
-            <small>{label}</small>
-            <Spark seed={name.length + i * 3} color={color} />
-          </div>
-        ))}
+    <div className="k-board-wrap">
+      <div className="k-push">$ git push</div>
+      <div className="k-board">
+        <div className="k-board-label">PRODUCTION</div>
+        <div className="k-board-grid">
+          {BOARD.map((s, i) => {
+            const I = s.icon;
+            const isBusy = busy === i;
+            return (
+              <div key={s.name} className={`k-svc${drawn && !isBusy ? ' live' : ''}`}>
+                <div className="k-svc-top">
+                  <I /> {s.name}
+                  <span className={`k-state${isBusy ? ' busy' : ''}`}>{isBusy ? 'Deploying' : 'Live'}</span>
+                </div>
+                <div className="k-svc-kind">{s.kind}</div>
+                <svg className="k-spark" viewBox="0 0 200 30" preserveAspectRatio="none" aria-hidden="true">
+                  <path d={sparkPath(s.pts)} pathLength={400} />
+                </svg>
+                <div className="k-svc-foot"><span>{s.metric}</span><b>{s.value}</b></div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-function PlanTable({ title, unit, plans }: { title: string; unit: string; plans: Plan[] }) {
+type FooterGroup = { title: string; links: [string, string][] };
+
+/** Footer columns; each column can stack more than one group. '@start' resolves to sign-up or the dashboard. */
+const FOOTER: FooterGroup[][] = [
+  [{ title: 'Services', links: [['Web services', '/docs#web-services'], ['Private services', '/docs#private-services'], ['Background workers', '/docs#background-workers'], ['Cron jobs', '/docs#cron-jobs'], ['Static sites', '/docs#static-sites'], ['Postgres', '/docs#postgres'], ['Persistent disks', '/docs#persistent-disks'], ['Environment variables', '/docs#environment-variables']] }],
+  [{ title: 'Features', links: [['Preview environments', '/docs#preview-environments'], ['Infrastructure as code', '/docs#infrastructure-as-code'], ['Zero-downtime deploys', '/docs#deploys'], ['Autoscaling', '/docs#scaling'], ['Custom domains', '/docs#custom-domains'], ['Private networking', '/docs#private-network'], ['Logs and metrics', '/docs#logs-and-metrics']] }],
+  [{ title: 'Developers', links: [['Getting started', '/docs#getting-started'], ['Quickstarts', '/docs#quickstarts'], ['NAV CLI', '/docs#cli'], ['REST API', '/docs#rest-api'], ['Docker support', '/docs#docker'], ['Changelog', '/docs#changelog']] }],
+  [{ title: 'Resources', links: [['Pricing', '#pricing'], ['Examples', '/docs#quickstarts'], ['Architecture', '/docs#self-hosting'], ['FAQ', '/docs#faq'], ['Self-hosting guide', '/docs#self-hosting']] }],
+  [
+    { title: 'Runtimes', links: [['Node.js', '/docs#quickstarts'], ['Python', '/docs#quickstarts'], ['Go', '/docs#quickstarts'], ['Bun', '/docs#quickstarts'], ['Dockerfile', '/docs#docker']] },
+    { title: 'Platform', links: [['Control plane', '/docs#self-hosting'], ['Agent', '/docs#self-hosting'], ['Edge proxy', '/docs#self-hosting']] },
+  ],
+  [
+    { title: 'Account', links: [['Sign up', '@start'], ['Log in', '/login']] },
+    { title: 'Trust', links: [['Security model', '/docs#security'], ['Hardened containers', '/docs#security'], ['Verified webhooks', '/docs#security']] },
+  ],
+];
+
+type FloatTile = { c: string; icon?: Icon; label?: string; name: string };
+
+/**
+ * Tiles around the closing call to action, as mirrored left/right pairs ordered top to bottom.
+ * x is the left tile's position (the right one sits at 100 - x); s is the parallax speed both share.
+ */
+const FLOAT_PAIRS: { x: number; y: number; s: number; tiles: [FloatTile, FloatTile] }[] = [
+  { x: 31, y: 3, s: 1.2, tiles: [{ c: '#facc15', icon: Terminal, name: 'Python' }, { c: '#22d3ee', label: 'Go', name: 'Go' }] },
+  { x: 14, y: 9, s: -0.6, tiles: [{ c: '#f97316', icon: GitBranch, name: 'Git' }, { c: '#a78bfa', icon: Layers, name: 'Static sites' }] },
+  { x: 5, y: 23, s: 0.9, tiles: [{ c: '#38bdf8', icon: Container, name: 'Docker' }, { c: '#f472b6', icon: Webhook, name: 'Webhooks' }] },
+  { x: 13, y: 44, s: -1.1, tiles: [{ c: '#fb923c', icon: Cpu, name: 'Builds' }, { c: '#4ade80', label: 'yaml', name: 'Blueprints' }] },
+  { x: 25, y: 66, s: 0.7, tiles: [{ c: '#f9a8d4', label: 'Bun', name: 'Bun' }, { c: '#e879f9', icon: Network, name: 'Private network' }] },
+  { x: 7, y: 77, s: -0.9, tiles: [{ c: '#22c55e', icon: Hexagon, name: 'Node.js' }, { c: '#34d399', icon: Lock, name: 'TLS' }] },
+  { x: 40, y: 86, s: 1.0, tiles: [{ c: '#fdba74', icon: AlarmClock, name: 'Cron' }, { c: '#60a5fa', icon: Database, name: 'Postgres' }] },
+  { x: 21, y: 94, s: -0.5, tiles: [{ c: '#93c5fd', icon: Globe, name: 'Domains' }, { c: '#fde047', icon: HardDrive, name: 'Disks' }] },
+];
+
+/**
+ * Closing call to action: a framed panel ringed by tech tiles. As the section scrolls in, the tiles pop in pair by
+ * mirrored pair from the top down; as it scrolls out through the top they pop out in the same order, and scrolling
+ * back reverses either. Tiles also drift at their own parallax speed.
+ */
+function StartCta({ start, signedIn }: { start: string; signedIn: boolean }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.style.setProperty('--ni', '99');
+      el.style.setProperty('--no', '99');
+      return;
+    }
+    const pairs = FLOAT_PAIRS.length;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      // -1 when the section is entering from below, 0 when centred, 1 when leaving at the top.
+      const p = Math.max(-1.2, Math.min(1.2, (vh / 2 - (r.top + r.height / 2)) / ((vh + r.height) / 2)));
+      el.style.setProperty('--p', p.toFixed(4));
+      // Pairs that have entered (counting from the top as the section rises into view) and pairs still on screen
+      // (counting from the bottom as it leaves through the top). Whole numbers, so each pair pops rather than fades.
+      const span = Math.min(vh, r.height) * 0.8;
+      const entered = Math.floor(Math.max(0, Math.min(1, (vh - r.top) / span)) * (pairs + 0.999));
+      const remaining = Math.floor(Math.max(0, Math.min(1, r.bottom / span)) * (pairs + 0.999));
+      el.style.setProperty('--ni', String(entered));
+      el.style.setProperty('--no', String(remaining));
+    };
+    // Always (re)schedule: a frame requested while the tab was hidden may never run.
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
   return (
-    <div className="nl-plan nv-panel">
-      <header>
-        <h3>{title}</h3>
-        <p>{unit}</p>
-      </header>
-      <table>
-        <thead>
-          <tr>
-            <th>Plan</th>
-            <th>CPU</th>
-            <th>Memory</th>
-            <th style={{ textAlign: 'right' }}>Price</th>
-          </tr>
-        </thead>
-        <tbody>
-          {plans.map((p) => (
-            <tr key={p.id}>
-              <td>{p.name}</td>
-              <td className="mono">{p.cpu} vCPU</td>
-              <td className="mono">{formatMemory(p.memoryMB)}</td>
-              <td className="price">
-                <b style={{ fontWeight: 581 }}>${p.priceMonthly}</b>
-                <span style={{ color: '#6b7488' }}>/mo</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <section ref={ref} className="k-start" aria-labelledby="k-start-title">
+      <div className="k-floats" aria-hidden="true">
+        {FLOAT_PAIRS.flatMap((pair, i) =>
+          pair.tiles.map(({ icon: I, ...t }, side) => (
+            <span
+              key={t.name}
+              className="k-float"
+              title={t.name}
+              style={{
+                left: `${side ? 100 - pair.x : pair.x}%`,
+                top: `${pair.y}%`,
+                '--s': pair.s,
+                '--c': t.c,
+                '--i': i,
+                '--j': FLOAT_PAIRS.length - 1 - i,
+                '--d': `${(i % 4) * -1.4}s`,
+              } as React.CSSProperties}
+            >
+              <span className="k-float-in">{I ? <I /> : <b>{t.label}</b>}</span>
+            </span>
+          )),
+        )}
+      </div>
+      <div className="k-start-box k-rv">
+        <h2 id="k-start-title">Start building with NAV</h2>
+        <p>Your servers, zero babysitting.</p>
+        <Link to={start} className="k-btn k-btn-solid">{signedIn ? 'Open your dashboard' : 'Deploy your first service'} <ChevronRight /></Link>
+      </div>
+    </section>
   );
 }
-
-function Row({ title, body, link, slug, art }: { title: string; body: string; link: string; slug: string; art: ReactNode }) {
-  return (
-    <article className="nl-row nv-panel">
-      <div>
-        <h3>{title}</h3>
-        <p>{body}</p>
-        <Link to={doc(slug)} className="nl-doclink">
-          {link}
-        </Link>
-      </div>
-      <div className="nl-row-art" aria-hidden="true">
-        {art}
-      </div>
-    </article>
-  );
-}
-
-// ---- Page ------------------------------------------------------------------------------------------
-type MenuId = 'product' | 'solutions' | 'resources' | null;
 
 export function LandingPage() {
   useTitle(null);
   const me = useMe();
+  const navigate = useNavigate();
   const signedIn = !!me.data;
   const start = signedIn ? '/app' : '/signup';
   const rootRef = useRef<HTMLDivElement>(null);
-  const barRef = useRef<HTMLElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const footRef = useRef<HTMLSpanElement>(null);
-  const [menu, setMenu] = useState<MenuId>(null);
-  const [stuck, setStuck] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [showTop, setShowTop] = useState(false);
+  const [hourly, setHourly] = useState(false);
+  const [open, setOpen] = useState(0);
   const [status, setStatus] = useState<'checking' | 'up' | 'down'>('checking');
+  const typed = useTyped(TYPED);
+  useReveal(rootRef);
 
-  // Reduced motion pauses the background video (the CSS reset cannot reach media playback).
   useEffect(() => {
-    const v = videoRef.current;
-    const q = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (!v) return;
-    const sync = () => (q.matches ? v.pause() : void v.play()?.catch(() => {}));
-    sync();
-    q.addEventListener('change', sync);
-    return () => q.removeEventListener('change', sync);
-  }, []);
-
-  // Retire the entrance once the last tween ends, so later breakpoint changes never replay it.
-  useEffect(() => {
-    const root = rootRef.current;
-    const last = footRef.current;
-    if (!root || !last) return;
-    const done = () => {
-      clearTimeout(timer);
-      last.removeEventListener('animationend', done);
-      root.classList.add('is-entered');
-    };
-    const timer = setTimeout(done, 4000);
-    last.addEventListener('animationend', done);
-    return () => {
-      clearTimeout(timer);
-      last.removeEventListener('animationend', done);
-    };
-  }, []);
-
-  // Glass bar once the page scrolls past the hero top.
-  useEffect(() => {
-    const onScroll = () => setStuck(window.scrollY > 40);
+    const onScroll = () => setShowTop(window.scrollY > 900);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // Mega menus: Escape and outside clicks close them.
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenu(null);
-    const onDown = (e: MouseEvent) => !barRef.current?.contains(e.target as Node) && setMenu(null);
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onDown);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onDown);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); navigate('/docs'); }
+      if (e.key === 'Escape') setMenu(false);
     };
-  }, [menu]);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [navigate]);
 
-  // Real platform status for the footer.
   useEffect(() => {
     fetch('/api/v1/config', { cache: 'no-store' })
       .then((r) => setStatus(r.ok ? 'up' : 'down'))
       .catch(() => setStatus('down'));
   }, []);
 
-  const toggle = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
-  const menuButton = (id: Exclude<MenuId, null>, label: string) => (
-    <button type="button" aria-expanded={menu === id} aria-controls={`mega-${id}`} onClick={() => toggle(id)}>
-      {label}
-      <Caret />
-    </button>
-  );
+  const links: [string, string][] = [['Product', '#product'], ['Platform', '#platform'], ['Pricing', '#pricing'], ['Security', '#security'], ['Docs', '/docs']];
+  const plans = SERVICE_PLANS.filter((p) => ['free', 'starter', 'standard'].includes(p.id));
+  const planCopy: Record<string, { blurb: string; items: string[]; cta: string }> = {
+    free: { blurb: 'For side projects and trying NAV out.', items: ['Web services and static sites', 'Deploy on git push', 'TLS on a NAV subdomain', 'Build and runtime logs'], cta: 'Start for free' },
+    starter: { blurb: 'For production apps with steady traffic.', items: ['Zero-downtime deploys', 'Custom domains and TLS', 'Cron jobs and workers', 'Persistent disks', 'One-click rollbacks'], cta: 'Choose Starter' },
+    standard: { blurb: 'For services that need headroom.', items: ['Everything in Starter', 'Autoscaling', 'Preview environments', 'Private networking', 'Metrics for every instance'], cta: 'Choose Standard' },
+  };
+  const navLink = (label: string, href: string, cls?: string) =>
+    href.startsWith('/') ? <Link key={label} to={href} className={cls} onClick={() => setMenu(false)}>{label}</Link>
+      : <a key={label} href={href} className={cls} onClick={() => setMenu(false)}>{label}</a>;
 
   return (
-    <div ref={rootRef} className="nl" data-theme="dark" onMouseLeave={() => setMenu(null)}>
-      <div className="nl-announce">
-        <span>NAV is open infrastructure — run the whole platform on your own servers.</span>
-        <Link to={doc('self-hosting')}>Self-hosting guide</Link>
+    <div ref={rootRef} className={`k${menu ? ' menu-open' : ''}`} data-theme="dark">
+      <div className="k-grid-bg" aria-hidden="true" />
+
+      <div className="k-announce">
+        New: blueprints keep services, databases and env groups in sync with nav.yaml.
+        <Link to="/docs">Read the docs <ArrowRight size={13} /></Link>
       </div>
 
-      <header ref={barRef} className={`nl-bar${stuck ? ' is-stuck' : ''}`}>
-        <a className="nl-brand" href="#top" aria-label="NAV home">
-          <LogoMark />
-          <span aria-hidden>NAV</span>
-        </a>
-
-        <ul className="nl-menu">
-          <li>{menuButton('product', 'Product')}</li>
-          <li>{menuButton('solutions', 'Solutions')}</li>
-          <li>{menuButton('resources', 'Resources')}</li>
-          <li>
-            <Link to="/docs">Docs</Link>
-          </li>
-          <li>
-            <a href="#pricing">Pricing</a>
-          </li>
-        </ul>
-
-        <div className="nl-right">
-          <Link className="nl-login" to={signedIn ? '/app' : '/login'}>
-            {signedIn ? 'Open dashboard' : 'Log in / Sign up'}
-            <svg className="nl-navarrow" viewBox="0 0 10 9" aria-hidden="true">
-              <path d="M0 4.5 H9.1 M5.4 0.9 L9.2 4.5 L5.4 8.1" />
-            </svg>
-          </Link>
-          <Link className="nl-pill" to={start}>
-            {signedIn ? 'Dashboard' : 'Start for free'}
-          </Link>
-
-          {/* Below the desktop composition: pure-CSS checkbox menu, no JS. */}
-          <input className="nl-navtoggle" type="checkbox" id="nl-nav-open" aria-label="Toggle menu" />
-          <label className="nl-scrim" htmlFor="nl-nav-open" aria-hidden="true" />
-          <label className="nl-burger" htmlFor="nl-nav-open" aria-label="Menu">
-            <svg viewBox="0 0 22 14" aria-hidden="true">
-              <path className="b1" d="M1 1 H21" />
-              <path className="b2" d="M1 7 H21" />
-              <path className="b3" d="M1 13 H21" />
-            </svg>
-          </label>
-          <nav className="nl-mobile" aria-label="Mobile">
-            <details>
-              <summary>
-                Product <Caret />
-              </summary>
-              {PRODUCT_SERVICES.map((s) => (
-                <Link key={s.slug} to={doc(s.slug)}>
-                  {s.title}
-                </Link>
-              ))}
-              {PRODUCT_FEATURES.map(([t, s]) => (
-                <Link key={t} to={doc(s)}>
-                  {t}
-                </Link>
-              ))}
-            </details>
-            <details>
-              <summary>
-                Solutions <Caret />
-              </summary>
-              {SOLUTIONS.flatMap((g) => g.links).map(([t, s]) => (
-                <Link key={t} to={doc(s)}>
-                  {t}
-                </Link>
-              ))}
-            </details>
-            <details>
-              <summary>
-                Resources <Caret />
-              </summary>
-              {RESOURCES.map(([t, s]) => (
-                <Link key={t} to={doc(s)}>
-                  {t}
-                </Link>
-              ))}
-            </details>
-            <Link to="/docs">Docs</Link>
-            <a href="#pricing">Pricing</a>
-            <Link to={signedIn ? '/app' : '/login'}>{signedIn ? 'Open dashboard' : 'Log in / Sign up'}</Link>
-            <Link className="nl-pill" to={start}>
-              {signedIn ? 'Dashboard' : 'Start for free'}
-            </Link>
-          </nav>
+      <header className="k-nav">
+        <div className="k-nav-inner">
+          <Link to="/" className="k-brand" aria-label="NAV home"><Logo /></Link>
+          <nav className="k-links" aria-label="Primary">{links.map(([l, h]) => navLink(l, h))}</nav>
+          <div className="k-nav-right">
+            <Link to="/docs" className="k-search"><Search /> Search docs <span className="k-kbd">Ctrl K</span></Link>
+            {!signedIn && <Link to="/login" className="k-login">Log in</Link>}
+            <Link to={start} className="k-cta-nav">{signedIn ? 'Dashboard' : 'Get started'} <ArrowRight /></Link>
+          </div>
+          <button type="button" className="k-burger" aria-label={menu ? 'Close menu' : 'Open menu'} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
+            {menu ? <X size={18} /> : <Menu size={18} />}
+          </button>
         </div>
-
-        {menu === 'product' && (
-          <div id="mega-product" className="nl-mega" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
-            <div>
-              <h4>Services</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 24 }}>
-                {PRODUCT_SERVICES.map((s) => (
-                  <Link key={s.slug} to={doc(s.slug)} className="nl-mega-item" onClick={() => setMenu(null)}>
-                    <s.icon strokeWidth={1.6} />
-                    <span>
-                      <b>{s.title}</b>
-                      <small>{s.body}</small>
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h4>Features</h4>
-              {PRODUCT_FEATURES.map(([t, s]) => (
-                <Link key={t} to={doc(s)} className="nl-mega-link" onClick={() => setMenu(null)}>
-                  {t}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-        {menu === 'solutions' && (
-          <div id="mega-solutions" className="nl-mega" style={{ gridTemplateColumns: '1fr 1fr 1.3fr 1fr' }}>
-            {SOLUTIONS.slice(0, 2).map((g) => (
-              <div key={g.title}>
-                <h4>{g.title}</h4>
-                {g.links.map(([t, s]) => (
-                  <Link key={t} to={doc(s)} className="nl-mega-link" onClick={() => setMenu(null)}>
-                    {t}
-                  </Link>
-                ))}
-              </div>
-            ))}
-            <div>
-              <h4>Architecture</h4>
-              <Link to={doc('getting-started')} className="nl-mega-card" onClick={() => setMenu(null)}>
-                <div className="nl-mega-card-art" />
-                <div style={{ padding: '12px 14px' }}>
-                  <b style={{ fontWeight: 506, fontSize: 13.5 }}>How a git push becomes a live service</b>
-                  <small style={{ display: 'block', color: '#a2a9b8', marginTop: 4 }}>Builds, health checks and the edge, end to end →</small>
-                </div>
-              </Link>
-            </div>
-            <div>
-              <h4>{SOLUTIONS[2].title}</h4>
-              {SOLUTIONS[2].links.map(([t, s]) => (
-                <Link key={t} to={doc(s)} className="nl-mega-link" onClick={() => setMenu(null)}>
-                  {t}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-        {menu === 'resources' && (
-          <div id="mega-resources" className="nl-mega" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-            <div>
-              <h4>Learn</h4>
-              {RESOURCES.slice(0, 3).map(([t, s]) => (
-                <Link key={t} to={doc(s)} className="nl-mega-link" onClick={() => setMenu(null)}>
-                  {t}
-                </Link>
-              ))}
-            </div>
-            <div>
-              <h4>Build</h4>
-              {RESOURCES.slice(3).map(([t, s]) => (
-                <Link key={t} to={doc(s)} className="nl-mega-link" onClick={() => setMenu(null)}>
-                  {t}
-                </Link>
-              ))}
-            </div>
-            <div>
-              <h4>Account</h4>
-              <Link to={start} className="nl-mega-link" onClick={() => setMenu(null)}>
-                {signedIn ? 'Dashboard' : 'Create an account'}
-              </Link>
-              <a href="#pricing" className="nl-mega-link" onClick={() => setMenu(null)}>
-                Pricing
-              </a>
-              <Link to={doc('security')} className="nl-mega-link" onClick={() => setMenu(null)}>
-                Security
-              </Link>
-            </div>
-          </div>
-        )}
       </header>
+      <div className="k-sheet" aria-hidden={!menu}>
+        {links.map(([l, h]) => navLink(l, h))}
+        {!signedIn && navLink('Log in', '/login')}
+        <Link to={start} className="k-btn k-btn-solid" onClick={() => setMenu(false)}>{signedIn ? 'Open dashboard' : 'Get started'} <ArrowRight /></Link>
+      </div>
 
-      {/* ---- Hero ---- */}
-      <section className="nl-hero" id="top">
-        <video ref={videoRef} className="nl-art" autoPlay muted loop playsInline preload="auto" aria-hidden="true" poster={ART_POSTER} src={ART_VIDEO} />
-        <div className="nl-veil" />
-        <main className="nl-stage">
-          <h1 className="nl-title">
-            <span>Your Fastest Path to Production,</span>{' '}
-            <span>on Infrastructure You Own.</span>
-          </h1>
-          <p className="nl-sub">
-            <span>Deploy web services, workers, cron jobs and Postgres</span>{' '}
-            <span>from a git push — NAV runs the rest.</span>
-          </p>
-          <Link className="nl-cta nv-btn nv-cta" to={start}>
-            <span>{signedIn ? 'Open your dashboard' : 'Start for free'}</span>
-            <svg className="nl-arrow" viewBox="0 0 16 11" aria-hidden="true">
-              <path d="M0 5.5 H14.6 M10.3 1.2 L14.9 5.5 L10.3 9.8" />
-            </svg>
-          </Link>
-          <ul className="nl-feats">
-            {['Git push deploys', 'Zero-downtime releases', 'Managed Postgres', 'Self-hostable'].map((f) => (
-              <li key={f}>
-                <Chev />
-                <span>{f}</span>
-              </li>
-            ))}
-          </ul>
-          <span className="nl-rule nv-rule" aria-hidden="true" />
-        </main>
-        <footer className="nl-foot">
-          <span>Open infrastructure for teams who would rather ship than babysit servers.</span>
-          <span ref={footRef}>v0.1</span>
-        </footer>
-      </section>
-
-      {/* ---- Production at a glance ---- */}
-      <section className="nl-section" id="platform">
-        <div className="nl-inner nl-prod">
+      <main className="k-col">
+        {/* ---- Hero ---- */}
+        <section className="k-hero" id="product">
           <div>
-            <span className="nl-kicker">Production</span>
-            <h2 className="nl-h2">Push once. Watch it go live.</h2>
-            <p className="nl-lede">Every service gets health-checked instances, live metrics and a public URL the moment its first deploy passes.</p>
-            <span className="nl-gitchip">$ git push</span>
-          </div>
-          <div className="nl-board nv-panel">
-            <div className="nl-board-head">
-              <span>Production</span>
-              <span style={{ color: '#5fe0a3' }}>● all healthy</span>
+            <h1 className="k-h1">
+              Push to deploy<br />
+              <span className="sr-only">web services, workers, cron jobs, Postgres and static sites</span>
+              <span className="k-typed" aria-hidden="true">{typed}<span className="k-caret" /></span>
+            </h1>
+            <p className="k-lede">Connect a repository and NAV builds it, health-checks it and routes traffic to it, on servers you control.</p>
+            <div className="k-actions">
+              <Link to={start} className="k-btn k-btn-solid">{signedIn ? 'Open dashboard' : 'Start deploying'} <ChevronRight /></Link>
+              <Link to="/docs" className="k-btn k-btn-line">Read the docs</Link>
             </div>
-            <div className="nl-svcs">
-              <ServiceCard name="app-backend" icon={Globe} metrics={[['Memory', '#a8ccfc'], ['CPU', '#ffe2b2']]} />
-              <ServiceCard name="app-worker" icon={Cpu} metrics={[['Memory', '#a8ccfc'], ['Jobs', '#ffe2b2']]} />
-              <ServiceCard name="app-database" icon={Database} metrics={[['Memory', '#a8ccfc'], ['Connections', '#ffe2b2']]} />
-              <ServiceCard name="app-frontend" icon={Layers} metrics={[['Requests', '#a8ccfc'], ['Bandwidth', '#ffe2b2']]} />
+            <div className="k-proof">
+              <span><i><Github /> Deploys from</i><b>git push</b></span>
+              <span><i><CheckCircle2 /> E2E</i><b>16/16</b></span>
+              <span><i><Server /> Runtime</i><b>Docker · process</b></span>
             </div>
           </div>
+          <HeroBoard />
+        </section>
+
+        {/* ---- Scroll story ---- */}
+        <Story />
+      </main>
+
+      {/* ---- Runtime band ---- */}
+      <section className="k-band">
+        <span className="k-pix" style={{ left: 0, bottom: 22 }} />
+        <span className="k-pix" style={{ left: 22, bottom: 0 }} />
+        <span className="k-pix" style={{ left: 66, bottom: 0, width: 32, height: 32 }} />
+        <div>
+          <h2 className="k-h2">Bring your runtime. NAV works out the rest.</h2>
+          <p>Use your own framework, language or Dockerfile. Start from an example or deploy straight from your repository.</p>
+          <Link to="/docs" className="k-btn k-btn-solid">Browse examples <ChevronRight /></Link>
+        </div>
+        <div className="k-band-rows" aria-hidden="true">
+          {[0, 1].map((r) => {
+            const row = [...BAND.slice(r * 6), ...BAND.slice(0, r * 6)];
+            return (
+              <div key={r} className={`k-band-row${r ? ' rev' : ''}`}>
+                {[...row, ...row].map(([I, n], i) => <span key={i} className="k-chip"><I />{n}</span>)}
+              </div>
+            );
+          })}
         </div>
       </section>
 
-      {/* ---- Whatever your stack ---- */}
-      <section className="nl-stack" aria-labelledby="stack-h">
-        <div>
-          <h2 id="stack-h" className="nl-h2" style={{ marginTop: 0, fontSize: 'clamp(28px, 3vw, 40px)' }}>
-            Whatever your stack, it runs on NAV.
-          </h2>
-          <Link to={doc('quickstarts')} className="nv-btn nv-hair" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 42, padding: '0 20px', marginTop: 24, fontSize: 13.5 }}>
-            View quickstarts →
-          </Link>
-        </div>
-        <div className="nl-marquee" aria-label="Supported runtimes and frameworks">
-          {[0, 1].map((row) => (
-            <div key={row} className={`nl-track${row ? ' rev' : ''}`}>
-              {[...STACK.slice(row * 8, row * 8 + 8), ...STACK.slice(row * 8, row * 8 + 8)].map(([g, name], i) => (
-                <span key={`${name}-${i}`} className="nl-tile" aria-hidden={i >= 8}>
-                  <span>
-                    <b>{g}</b>
-                    {name}
-                  </span>
-                </span>
+      <main className="k-col">
+        {/* ---- Pricing ---- */}
+        <section className="k-sec" id="pricing" style={{ textAlign: 'center' }}>
+          <Cross />
+          <span className="k-eyebrow k-rv">Pricing</span>
+          <h2 className="k-h2 k-rv" style={{ marginInline: 'auto' }}>Plans that grow with your service</h2>
+          <p className="k-lede k-rv" style={{ marginInline: 'auto' }}>Each service picks its own plan, and you can change it at any time.</p>
+          <div className="k-toggle k-rv">
+            <div className="k-filters" role="group" aria-label="Billing period">
+              <button type="button" aria-pressed={!hourly} onClick={() => setHourly(false)}>Monthly</button>
+              <button type="button" aria-pressed={hourly} onClick={() => setHourly(true)}>Hourly</button>
+            </div>
+            <span className="k-save">Prorated by the second</span>
+          </div>
+          <div className="k-plans" style={{ textAlign: 'left' }}>
+            {plans.map((p) => {
+              const c = planCopy[p.id];
+              const pop = p.id === 'standard';
+              const price = hourly ? (p.priceMonthly / 730).toFixed(4) : String(p.priceMonthly);
+              return (
+                <div key={p.id} className={`k-plan k-rv${pop ? ' pop' : ''}`}>
+                  <div className="k-plan-name">{p.name}{pop && <em>MOST POPULAR</em>}</div>
+                  <p>{c?.blurb}</p>
+                  <div className="k-price"><b>${price}</b><span>/ {hourly ? 'hour' : 'month'}</span></div>
+                  <div className="k-spec">{p.cpu} CPU · {formatMemory(p.memoryMB)} RAM</div>
+                  <ul>{c?.items.map((i) => <li key={i}><Check />{i}</li>)}</ul>
+                  <Link to={start} className={`k-btn ${pop ? 'k-btn-solid' : 'k-btn-line'}`}>{c?.cta}</Link>
+                </div>
+              );
+            })}
+          </div>
+          <div className="k-center"><Link to="/docs" className="k-link">Compare every plan <ArrowRight /></Link></div>
+        </section>
+
+        {/* ---- Security ---- */}
+        <section className="k-sec k-sec-tight" id="security">
+          <Cross />
+          <div className="k-head-row k-rv">
+            <div>
+              <span className="k-eyebrow">Security</span>
+              <h2 className="k-h2">Secure by default</h2>
+            </div>
+            <Link to="/docs#security" className="k-link">Read the security model <ArrowRight /></Link>
+          </div>
+          <div className="k-sec6 k-rv">
+            {SECURITY.map(({ icon: I, title, body }) => (
+              <div key={title} className="k-sec6-item"><i><I /></i><h3>{title}</h3><p>{body}</p></div>
+            ))}
+          </div>
+        </section>
+
+        {/* ---- FAQ ---- */}
+        <section className="k-sec">
+          <Cross />
+          <div className="k-faq">
+            <div className="k-faq-side k-rv">
+              <span className="k-eyebrow">FAQ</span>
+              <h2 className="k-h2">Questions, answered</h2>
+              <p className="k-lede">Still curious? The docs cover every part of the platform in depth.</p>
+              <Link to="/docs" className="k-btn k-btn-line">Read the docs</Link>
+            </div>
+            <div className="k-rv">
+              {FAQ.map(([q, a], i) => (
+                <div key={q} className={`k-qa${open === i ? ' open' : ''}`}>
+                  <button type="button" aria-expanded={open === i} onClick={() => setOpen(open === i ? -1 : i)}>
+                    <small>{String(i + 1).padStart(2, '0')}</small>{q}<Plus />
+                  </button>
+                  <div className="k-qa-body"><div><p>{a}</p></div></div>
+                </div>
               ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
+        </section>
 
-      {/* ---- Click, click, done ---- */}
-      <section className="nl-section" id="how">
-        <div className="nl-inner">
-          <span className="nl-kicker">How it works</span>
-          <h2 className="nl-h2">Click, click, done.</h2>
-          <div className="nl-steps">
-            <div className="nl-step nv-panel">
-              <span className="nl-step-n">1</span>
-              <h3>Pick a service</h3>
-              <p>Web service, private service, worker, cron job, static site or Postgres — whatever your app needs.</p>
-              <div className="nl-step-art" aria-hidden="true">
-                {['Web Service', 'Background Worker', 'Cron Job', 'Static Site', 'Postgres'].map((s, i) => (
-                  <div key={s} className={`nl-choice${i === 0 ? ' on' : ''}`}>
-                    <span>{s}</span>
-                    {i === 0 && <span style={{ color: '#5fe0a3' }}>✓</span>}
+        {/* ---- Closing call to action ---- */}
+        <StartCta start={start} signedIn={signedIn} />
+
+        {/* ---- Footer ---- */}
+        <footer className="k-foot">
+          <div className="k-foot-grid">
+            {FOOTER.map((col) => (
+              <div key={col[0].title} className="k-foot-col">
+                {col.map((g) => (
+                  <div key={g.title} className="k-foot-group">
+                    <h4>{g.title}</h4>
+                    {g.links.map(([l, href]) => {
+                      const to = href === '@start' ? start : href;
+                      const label = href === '@start' ? (signedIn ? 'Dashboard' : 'Sign up') : l;
+                      return to.startsWith('#') ? <a key={l} href={to}>{label}</a> : <Link key={l} to={to}>{label}</Link>;
+                    })}
                   </div>
                 ))}
               </div>
-            </div>
-            <div className="nl-step nv-panel">
-              <span className="nl-step-n">2</span>
-              <h3>Deploy your code</h3>
-              <p>Connect a repo. NAV detects the runtime, builds it and gates the release on health checks.</p>
-              <div className="nl-step-art nl-log" aria-hidden="true">
-                <span className="cm">==&gt; Cloning repository@main</span>
-                {'\n'}
-                <span className="hl">==&gt; Detected runtime: node</span>
-                {'\n'}==&gt; npm ci &amp;&amp; npm run build{'\n'}    build-info.json written{'\n'}
-                <span className="cm">==&gt; Starting 2 instances</span>
-                {'\n'}
-                <span className="ok">==&gt; Your service is live ✓</span>
-              </div>
-            </div>
-            <div className="nl-step nv-panel">
-              <span className="nl-step-n">3</span>
-              <h3>NAV does the rest</h3>
-              <p>Networking, TLS, scaling, previews, rollbacks and monitoring — ready from the first deploy.</p>
-              <div className="nl-step-art" aria-hidden="true">
-                <svg viewBox="0 0 260 170" style={{ width: '100%', height: '100%' }}>
-                  <defs>
-                    <linearGradient id="nl-wire" x1="0" x2="1">
-                      <stop stopColor="#ffe2b2" />
-                      <stop offset="1" stopColor="#a8ccfc" />
-                    </linearGradient>
-                  </defs>
-                  {[
-                    [130, 18, 'edge'],
-                    [60, 85, 'web'],
-                    [200, 85, 'api'],
-                    [60, 150, 'worker'],
-                    [200, 150, 'postgres'],
-                  ].map(([x, y, label]) => (
-                    <g key={label as string}>
-                      <rect x={(x as number) - 34} y={(y as number) - 13} width="68" height="26" rx="13" fill="rgba(255,255,255,0.05)" stroke="rgba(196,214,232,0.35)" />
-                      <text x={x as number} y={(y as number) + 4} textAnchor="middle" fill="#e2ebf5" fontSize="11" fontFamily="var(--font-mono)">
-                        {label}
-                      </text>
-                    </g>
-                  ))}
-                  <path d="M118 31 L72 72 M142 31 L188 72 M60 98 L60 137 M200 98 L200 137 M94 85 L166 85 M200 98 L94 145" stroke="url(#nl-wire)" strokeWidth="1.2" fill="none" strokeDasharray="3 3" />
-                </svg>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ---- Zero ops ---- */}
-      <section className="nl-section" id="features">
-        <div className="nl-inner">
-          <span className="nl-kicker">Platform</span>
-          <h2 className="nl-h2">
-            Deploy apps and agents with <span className="nl-glow-text">zero ops</span>
-          </h2>
-          <div className="nl-hosting nv-panel">
-            <h3>Hosting and private networking for every piece of your architecture.</h3>
-            <div className="nl-chips">
-              {['Web services', 'Postgres databases', 'Cron jobs', 'Static sites', 'Background workers', 'Private services', 'WebSockets', 'Persistent disks', 'Env groups', 'Custom domains'].map((c) => (
-                <span key={c} className="nl-chip">
-                  {c}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="nl-rows">
-            <Row
-              title="Previews for every pull request"
-              body="Open a PR and NAV deploys an isolated copy of the service with its own URL, then tears it down when the PR closes."
-              link="Preview environment docs"
-              slug="preview-environments"
-              art={
-                <div className="nl-log">
-                  <span className="cm">#142 Add billing page</span>
-                  {'\n'}  ↳ api-pr-142.nav.app <span className="ok">● live</span>
-                  {'\n'}
-                  <span className="cm">#139 Upgrade router</span>
-                  {'\n'}  ↳ api-pr-139.nav.app <span className="hl">● building</span>
-                  {'\n'}
-                  <span className="cm">#131 Fix CSV export</span>
-                  {'\n'}  ↳ closed · preview removed
-                </div>
-              }
-            />
-            <Row
-              title="Load-based autoscaling for traffic spikes"
-              body="Set CPU or memory targets and NAV adds instances behind the load balancer when load rises, then scales back down gently."
-              link="Autoscaling docs"
-              slug="scaling"
-              art={
-                <div>
-                  <span className="nl-chip" style={{ display: 'inline-block' }}>
-                    Compute plan · {SERVICE_PLANS[SERVICE_PLANS.length - 1].cpu} vCPU · {formatMemory(SERVICE_PLANS[SERVICE_PLANS.length - 1].memoryMB)}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 140, marginTop: 18 }}>
-                    {[2, 2, 3, 3, 4, 6, 8, 8, 7, 5, 4, 3, 3, 2].map((n, i) => (
-                      <div key={i} style={{ flex: 1, height: `${n * 12}%`, borderRadius: 4, background: 'linear-gradient(180deg, #a8ccfc, rgba(168,204,252,0.15))' }} />
-                    ))}
-                  </div>
-                </div>
-              }
-            />
-            <Row
-              title="Background workers and cron, without the plumbing"
-              body="Run long-lived workers and scheduled jobs from the same repo — every run logged with its exit code and duration."
-              link="Cron job docs"
-              slug="cron-jobs"
-              art={
-                <div className="nl-log">
-                  0 3 * * *   nightly-report   <span className="ok">succeeded</span> 4.2s{'\n'}*/5 * * * * sync-invoices    <span className="ok">succeeded</span> 1.1s{'\n'}0 * * * *   prune-sessions   <span className="ok">succeeded</span> 0.4s{'\n'}*/5 * * * * sync-invoices    <span className="hl">exit 2</span>      0.9s{'\n'}worker      queue-consumer   <span className="cm">running · 3 instances</span>
-                </div>
-              }
-            />
-            <Row
-              title="Managed Postgres with backups built in"
-              body="Real PostgreSQL clusters with automatic daily backups, one-click restore, IP allow lists and a SQL console in the dashboard."
-              link="Postgres docs"
-              slug="postgres"
-              art={
-                <div className="nl-log">
-                  <span className="cm">nav-db › SELECT count(*) FROM orders;</span>
-                  {'\n'} count{'\n'}-------{'\n'} 48213{'\n'}(1 row · 3 ms){'\n\n'}
-                  <span className="ok">backup bkp_9x… completed · 18.4 MB</span>
-                </div>
-              }
-            />
-            <Row
-              title="Logs and metrics for builds, deploys and live services"
-              body="Live-tail build and runtime logs, search history, and watch CPU, memory, requests and latency from day zero."
-              link="Observability docs"
-              slug="logs-and-metrics"
-              art={
-                <div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    {[['CPU', '#ffe2b2'], ['Memory', '#a8ccfc'], ['Requests / min', '#a8ccfc'], ['p50 latency', '#ffe2b2']].map(([l, c], i) => (
-                      <div key={l} className="nl-spark">
-                        <small>{l}</small>
-                        <Spark seed={i * 2.3 + 1} color={c} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              }
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ---- Statement ---- */}
-      <section className="nl-section nl-statement">
-        <div className="nl-inner">
-          <blockquote>
-            “Git push in, production out. Everything in between is <span className="nl-glow-text">ours to run</span> — and yours to own.”
-          </blockquote>
-          <cite>The NAV principle</cite>
-        </div>
-      </section>
-
-      {/* ---- Builders grid ---- */}
-      <section className="nl-section">
-        <div className="nl-inner">
-          <span className="nl-kicker">Primitives</span>
-          <h2 className="nl-h2">Intuitive infrastructure, designed for builders</h2>
-          <p className="nl-lede">Ship software faster with integrated primitives that just work together.</p>
-          <div className="nl-grid">
-            {BUILDER_TILES.map((t) => (
-              <div key={t.title} className="nl-card nv-panel">
-                <span className="nl-card-ico">
-                  <t.icon strokeWidth={1.6} />
-                </span>
-                <h3>
-                  {t.title}
-                  {t.soon && <span className="nl-soon">Soon</span>}
-                </h3>
-                <p>{t.body}</p>
-              </div>
             ))}
           </div>
-        </div>
-      </section>
+          <div className="k-foot-bottom">
+            <div className="k-foot-left">
+              <Link to="/" aria-label="NAV home" className="k-foot-mark"><LogoMark /></Link>
+              <span className={`k-status ${status}`}><i />{status === 'up' ? 'All systems operational' : status === 'down' ? 'Control plane unreachable' : 'Checking status…'}</span>
+            </div>
+            <span>© {new Date().getFullYear()} NAV. Self-hosted deployment platform.</span>
+          </div>
+        </footer>
+      </main>
 
-      {/* ---- Security ---- */}
-      <section className="nl-section">
-        <div className="nl-inner">
-          <span className="nl-kicker">Security</span>
-          <h2 className="nl-h2">Secure and resilient by default</h2>
-          <p className="nl-lede">Build products, not hardening checklists.</p>
-          <div className="nl-grid three">
-            {SECURITY_TILES.map((t) => (
-              <div key={t.title} className="nl-card nv-panel">
-                <span className="nl-card-ico">
-                  <t.icon strokeWidth={1.6} />
-                </span>
-                <h3>{t.title}</h3>
-                <p>{t.body}</p>
-              </div>
-            ))}
-          </div>
-          <div className="nl-links">
-            <Link to={doc('security')} className="nv-btn nv-hair">
-              Security model →
-            </Link>
-            <Link to={doc('self-hosting')} className="nv-btn nv-hair">
-              Self-hosting guide →
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ---- Pricing ---- */}
-      <section className="nl-section" id="pricing">
-        <div className="nl-inner">
-          <span className="nl-kicker">Pricing</span>
-          <h2 className="nl-h2">Pay per instance. Nothing else.</h2>
-          <p className="nl-lede">Prorated by the second. Self-host NAV and set your own prices — these are the defaults.</p>
-          <div className="nl-plans">
-            <PlanTable title="Services" unit="Web services, private services, workers & cron jobs" plans={SERVICE_PLANS} />
-            <PlanTable title="Postgres" unit="Managed PostgreSQL 15, 16 and 17" plans={DATABASE_PLANS} />
-          </div>
-        </div>
-      </section>
-
-      {/* ---- Final CTA ---- */}
-      <section className="nl-final">
-        {[
-          ['JS', '12%', '22%', '0s'], ['Py', '20%', '68%', '1.2s'], ['Go', '82%', '20%', '0.6s'], ['Rb', '88%', '64%', '2s'],
-          ['🐳', '6%', '48%', '1.6s'], ['PG', '76%', '84%', '0.9s'], ['Bn', '30%', '86%', '2.4s'], ['N', '66%', '12%', '1.8s'],
-        ].map(([g, x, y, d]) => (
-          <span key={g} className="nl-float" style={{ left: x, top: y, animationDelay: d }} aria-hidden="true">
-            {g}
-          </span>
-        ))}
-        <div className="nl-inner" style={{ position: 'relative' }}>
-          <h2 className="nl-h2">Start building with NAV</h2>
-          <p className="nl-lede">Zero ops, zero surprises.</p>
-          <Link className="nl-cta nv-btn nv-cta" to={start} style={{ marginTop: 32, height: 50, padding: '0 28px 0 32px', fontSize: 17, gap: 14 }}>
-            <span>{signedIn ? 'Open your dashboard' : 'Deploy your app for free'}</span>
-            <svg className="nl-arrow" viewBox="0 0 16 11" aria-hidden="true" style={{ width: 16, height: 11 }}>
-              <path d="M0 5.5 H14.6 M10.3 1.2 L14.9 5.5 L10.3 9.8" />
-            </svg>
-          </Link>
-        </div>
-      </section>
-
-      {/* ---- Footer ---- */}
-      <footer className="nl-footer">
-        <div className="nl-inner">
-          <div className="nl-cols">
-            <div>
-              <h4>Services</h4>
-              {PRODUCT_SERVICES.map((s) => (
-                <Link key={s.slug} to={doc(s.slug)}>
-                  {s.title}
-                </Link>
-              ))}
-              <Link to={doc('persistent-disks')}>Persistent Disks</Link>
-            </div>
-            <div>
-              <h4>Features</h4>
-              {PRODUCT_FEATURES.map(([t, s]) => (
-                <Link key={t} to={doc(s)}>
-                  {t}
-                </Link>
-              ))}
-              <Link to={doc('docker')}>Docker support</Link>
-            </div>
-            <div>
-              <h4>Developers</h4>
-              <Link to="/docs">Docs</Link>
-              <Link to={doc('quickstarts')}>Framework Quickstarts</Link>
-              <Link to={doc('cli')}>NAV CLI</Link>
-              <Link to={doc('rest-api')}>REST API</Link>
-              <Link to={doc('changelog')}>Changelog</Link>
-            </div>
-            <div>
-              <h4>Resources</h4>
-              <a href="#pricing">Pricing</a>
-              <Link to={doc('self-hosting')}>Self-hosting</Link>
-              <Link to={doc('security')}>Security</Link>
-              <Link to={doc('faq')}>FAQ</Link>
-            </div>
-            <div>
-              <h4>Platform</h4>
-              <Link to={start}>{signedIn ? 'Dashboard' : 'Sign up'}</Link>
-              <Link to="/login">Log in</Link>
-              <a href="#how">How it works</a>
-              <a href="#features">Features</a>
-            </div>
-            <div>
-              <h4>Compare</h4>
-              <Link to={doc('faq')}>NAV vs. managed PaaS</Link>
-              <Link to={doc('self-hosting')}>NAV vs. raw VMs</Link>
-              <Link to={doc('docker')}>NAV vs. plain Docker</Link>
-            </div>
-          </div>
-          <div className="nl-bottom">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-              <LogoMark className="size-5" /> © {new Date().getFullYear()} NAV. Open infrastructure.
-            </span>
-            <span className={`nl-status${status === 'down' ? ' down' : ''}`} role="status">
-              <i aria-hidden="true" />
-              {status === 'checking' ? 'Checking status…' : status === 'up' ? 'All systems operational' : 'Control plane unreachable'}
-            </span>
-          </div>
-        </div>
-      </footer>
+      <button type="button" className={`k-top${showTop ? ' show' : ''}`} aria-label="Back to top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+        <ArrowUp />
+      </button>
     </div>
   );
 }

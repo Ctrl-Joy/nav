@@ -2,31 +2,33 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type Texta
 import { cn } from '@/lib/cn';
 
 export const controlClass =
-  'w-full rounded-lg border border-border bg-bg-elevated px-2.5 text-[13px] text-fg placeholder:text-fg-subtle ' +
-  'transition-colors hover:border-border-strong focus:border-accent focus:outline-none focus:ring-2 focus:ring-ring/40 ' +
+  'w-full rounded-[3px] border border-border-strong bg-transparent px-2.5 text-[13px] text-fg placeholder:text-fg-subtle ' +
+  'transition-colors hover:border-fg-subtle focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent ' +
   'disabled:cursor-not-allowed disabled:opacity-60 aria-[invalid=true]:border-danger';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   mono?: boolean;
+  /** 38px tall variant (page-level search fields). */
+  tall?: boolean;
   leading?: ReactNode;
   trailing?: ReactNode;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, mono, leading, trailing, ...rest }, ref) {
+export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ className, mono, tall, leading, trailing, ...rest }, ref) {
   if (leading || trailing) {
     return (
       <div className={cn('relative flex items-center', className)}>
-        {leading && <span className="pointer-events-none absolute left-2.5 flex text-fg-subtle">{leading}</span>}
+        {leading && <span className={cn('pointer-events-none absolute flex text-fg-subtle', tall ? 'left-3' : 'left-2.5')}>{leading}</span>}
         <input
           ref={ref}
-          className={cn(controlClass, 'h-8', mono && 'font-mono text-[12.5px]', leading ? 'pl-8' : '', trailing ? 'pr-9' : '')}
+          className={cn(controlClass, tall ? 'h-[38px] text-[14px]' : 'h-8', mono && 'font-mono text-[12.5px]', leading ? (tall ? 'pl-9' : 'pl-8') : '', trailing ? 'pr-9' : '')}
           {...rest}
         />
         {trailing && <span className="absolute right-1.5 flex">{trailing}</span>}
       </div>
     );
   }
-  return <input ref={ref} className={cn(controlClass, 'h-8', mono && 'font-mono text-[12.5px]', className)} {...rest} />;
+  return <input ref={ref} className={cn(controlClass, tall ? 'h-[38px] text-[14px]' : 'h-8', mono && 'font-mono text-[12.5px]', className)} {...rest} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { mono?: boolean }>(
@@ -101,13 +103,13 @@ export function Switch({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors disabled:opacity-50',
-        checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface-3',
+        checked ? 'border-accent-strong bg-accent-strong' : 'border-border-strong bg-surface-3',
       )}
     >
       <span
         className={cn(
-          'inline-block size-3.5 rounded-full shadow transition-transform',
-          checked ? 'translate-x-[18px] bg-accent-fg' : 'translate-x-[2px] bg-fg-muted',
+          'inline-block size-3.5 rounded-full transition-transform',
+          checked ? 'translate-x-[18px] bg-white' : 'translate-x-[2px] bg-fg-muted',
         )}
       />
     </button>
@@ -139,7 +141,7 @@ export function Checkbox({
     <label className={cn('inline-flex items-center gap-2 text-[13px] text-fg', disabled && 'opacity-60')}>
       <input
         type="checkbox"
-        className="size-4 rounded border-border accent-[var(--accent)]"
+        className="size-4 rounded-[2px] border-border accent-[var(--accent-strong)]"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}

@@ -10,8 +10,8 @@ export interface TabItem<T extends string = string> {
 
 const tabClass = (active: boolean) =>
   cn(
-    'relative -mb-px inline-flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-1 text-[13px] font-medium transition-colors',
-    active ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+    'relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-[14px] transition-colors',
+    active ? 'border-accent-strong font-medium text-fg' : 'border-transparent text-fg-muted hover:text-fg',
   );
 
 function onArrowKeys(e: KeyboardEvent<HTMLElement>) {
@@ -52,7 +52,7 @@ export function Tabs<T extends string>({
           onClick={() => onChange(t.value)}
         >
           {t.label}
-          {t.count !== undefined && <span className="rounded-full bg-surface-3 px-1.5 text-[11px] text-fg-muted">{t.count}</span>}
+          {t.count !== undefined && <span className="rounded-[3px] bg-surface-3 px-1.5 font-mono text-[11px] text-fg-muted">{t.count}</span>}
         </button>
       ))}
     </div>
