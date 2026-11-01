@@ -758,6 +758,7 @@ curl -X POST -H "Authorization: Bearer nav_<token>" -H "Content-Type: applicatio
           "Password reset links are single-use, stored hashed, expire after an hour and sign out every other session. The forgot-password endpoint gives the same answer whether or not the account exists.",
           "Two-factor authentication uses authenticator-app codes (each accepted once) with single-use recovery codes, and applies to password, provider and reset sign-ins. Workspaces can require it.",
           "Every change made through the API is written to the workspace audit log with the person or API key, the action and the IP address.",
+          "Organizations can verify their email domains and turn on SAML single sign-on and SCIM provisioning. When SSO or SCIM first claims an address in a verified domain whose NAV account never proved it owns that address, the account is taken over by the organization: its password, sessions, API keys, two-factor setup and linked sign-ins are removed before it is linked. This stops anyone registering a colleague's email in advance; the person keeps their workspaces but signs in through SSO from then on.",
         ],
       },
       { type: 'h3', text: 'Hardened containers', id: 'hardened-containers' },
