@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlarmClock, ArrowRight, ArrowUp, Box, Check, CheckCircle2, ChevronRight, Container, Cpu,
-  Database, FileCode2, Fingerprint, GitBranch, Globe, HardDrive, Hexagon, Layers, Lock,
-  Menu, Network, Plus, Search, Server, Terminal, Users, Webhook, Workflow, X,
+  ArrowRight, ArrowUp, Check, CheckCircle2, ChevronRight, Container,
+  Database, Fingerprint, Globe, Layers, Lock,
+  Menu, Network, Plus, Search, Server, Users, Webhook, Workflow, X,
 } from 'lucide-react';
 import { SERVICE_PLANS } from '@nav/shared';
 import { useMe } from '@/api/auth';
+import {
+  siAngular, siBun, siDeno, siDjango, siDocker, siGit, siGithub, siGitlab, siGo, siNextdotjs, siNodedotjs, siPhp,
+  siPostgresql, siPython, siReact, siRuby, siRust, siSvelte, siVuedotjs, type SimpleIcon,
+} from 'simple-icons';
+import { BrandIcon } from '@/components/BrandIcon';
 import { Github } from '@/components/GithubIcon';
-import { Logo, LogoMark } from '@/components/Logo';
+import { Logo } from '@/components/Logo';
 import { formatMemory } from '@/lib/format';
 import { useTitle } from '@/lib/useTitle';
 import { Story } from './landing/Story';
@@ -26,9 +31,10 @@ const BOARD: { name: string; kind: string; icon: Icon; metric: string; value: st
   { name: 'docs-site', kind: 'Static site', icon: Layers, metric: 'Bandwidth', value: '3.1 GB', pts: [10, 16, 13, 20, 14, 12, 22, 17, 24, 15, 21] },
 ];
 
-const BAND: [Icon, string][] = [
-  [Hexagon, 'Node.js'], [Terminal, 'Python'], [Box, 'Go'], [Cpu, 'Bun'], [Container, 'Docker'], [Database, 'Postgres'],
-  [GitBranch, 'Git'], [Lock, 'TLS'], [Webhook, 'Hooks'], [AlarmClock, 'Cron'], [Network, 'Private'], [FileCode2, 'nav.yaml'],
+/** Runtime band: technologies NAV builds and runs, natively or from a Dockerfile. */
+const BAND_ROWS: SimpleIcon[][] = [
+  [siNodedotjs, siPython, siGo, siBun, siDocker, siPostgresql, siDjango, siSvelte, siRuby],
+  [siPhp, siReact, siVuedotjs, siAngular, siNextdotjs, siRust, siDeno, siGithub, siGitlab],
 ];
 
 const SECURITY: { icon: Icon; title: string; body: string }[] = [
@@ -164,21 +170,21 @@ const FOOTER: FooterGroup[][] = [
   ],
 ];
 
-type FloatTile = { c: string; icon?: Icon; label?: string; name: string };
+type FloatTile = { c: string; brand: SimpleIcon };
 
 /**
  * Tiles around the closing call to action, as mirrored left/right pairs ordered top to bottom.
  * x is the left tile's position (the right one sits at 100 - x); s is the parallax speed both share.
  */
 const FLOAT_PAIRS: { x: number; y: number; s: number; tiles: [FloatTile, FloatTile] }[] = [
-  { x: 31, y: 3, s: 1.2, tiles: [{ c: '#facc15', icon: Terminal, name: 'Python' }, { c: '#22d3ee', label: 'Go', name: 'Go' }] },
-  { x: 14, y: 9, s: -0.6, tiles: [{ c: '#f97316', icon: GitBranch, name: 'Git' }, { c: '#a78bfa', icon: Layers, name: 'Static sites' }] },
-  { x: 5, y: 23, s: 0.9, tiles: [{ c: '#38bdf8', icon: Container, name: 'Docker' }, { c: '#f472b6', icon: Webhook, name: 'Webhooks' }] },
-  { x: 13, y: 44, s: -1.1, tiles: [{ c: '#fb923c', icon: Cpu, name: 'Builds' }, { c: '#4ade80', label: 'yaml', name: 'Blueprints' }] },
-  { x: 25, y: 66, s: 0.7, tiles: [{ c: '#f9a8d4', label: 'Bun', name: 'Bun' }, { c: '#e879f9', icon: Network, name: 'Private network' }] },
-  { x: 7, y: 77, s: -0.9, tiles: [{ c: '#22c55e', icon: Hexagon, name: 'Node.js' }, { c: '#34d399', icon: Lock, name: 'TLS' }] },
-  { x: 40, y: 86, s: 1.0, tiles: [{ c: '#fdba74', icon: AlarmClock, name: 'Cron' }, { c: '#60a5fa', icon: Database, name: 'Postgres' }] },
-  { x: 21, y: 94, s: -0.5, tiles: [{ c: '#93c5fd', icon: Globe, name: 'Domains' }, { c: '#fde047', icon: HardDrive, name: 'Disks' }] },
+  { x: 31, y: 3, s: 1.2, tiles: [{ c: '#4b8bbe', brand: siPython }, { c: '#00add8', brand: siGo }] },
+  { x: 14, y: 9, s: -0.6, tiles: [{ c: '#f05033', brand: siGit }, { c: '#ff3e00', brand: siSvelte }] },
+  { x: 5, y: 23, s: 0.9, tiles: [{ c: '#2496ed', brand: siDocker }, { c: '#44b78b', brand: siDjango }] },
+  { x: 13, y: 44, s: -1.1, tiles: [{ c: '#cc342d', brand: siRuby }, { c: '#8892bf', brand: siPhp }] },
+  { x: 25, y: 66, s: 0.7, tiles: [{ c: '#fbf0df', brand: siBun }, { c: '#dd0031', brand: siAngular }] },
+  { x: 7, y: 77, s: -0.9, tiles: [{ c: '#5fa04e', brand: siNodedotjs }, { c: '#4fc08d', brand: siVuedotjs }] },
+  { x: 40, y: 86, s: 1.0, tiles: [{ c: '#61dafb', brand: siReact }, { c: '#6b8fef', brand: siPostgresql }] },
+  { x: 21, y: 94, s: -0.5, tiles: [{ c: '#f0f0f0', brand: siGithub }, { c: '#dea584', brand: siRust }] },
 ];
 
 /**
@@ -231,11 +237,11 @@ function StartCta({ start, signedIn }: { start: string; signedIn: boolean }) {
     <section ref={ref} className="k-start" aria-labelledby="k-start-title">
       <div className="k-floats" aria-hidden="true">
         {FLOAT_PAIRS.flatMap((pair, i) =>
-          pair.tiles.map(({ icon: I, ...t }, side) => (
+          pair.tiles.map((t, side) => (
             <span
-              key={t.name}
+              key={t.brand.slug}
               className="k-float"
-              title={t.name}
+              title={t.brand.title}
               style={{
                 left: `${side ? 100 - pair.x : pair.x}%`,
                 top: `${pair.y}%`,
@@ -246,7 +252,7 @@ function StartCta({ start, signedIn }: { start: string; signedIn: boolean }) {
                 '--d': `${(i % 4) * -1.4}s`,
               } as React.CSSProperties}
             >
-              <span className="k-float-in">{I ? <I /> : <b>{t.label}</b>}</span>
+              <span className="k-float-in"><BrandIcon icon={t.brand} /></span>
             </span>
           )),
         )}
@@ -271,7 +277,6 @@ export function LandingPage() {
   const [showTop, setShowTop] = useState(false);
   const [hourly, setHourly] = useState(false);
   const [open, setOpen] = useState(0);
-  const [status, setStatus] = useState<'checking' | 'up' | 'down'>('checking');
   const typed = useTyped(TYPED);
   useReveal(rootRef);
 
@@ -289,12 +294,6 @@ export function LandingPage() {
       window.removeEventListener('keydown', onKey);
     };
   }, [navigate]);
-
-  useEffect(() => {
-    fetch('/api/v1/config', { cache: 'no-store' })
-      .then((r) => setStatus(r.ok ? 'up' : 'down'))
-      .catch(() => setStatus('down'));
-  }, []);
 
   const links: [string, string][] = [['Product', '#product'], ['Platform', '#platform'], ['Pricing', '#pricing'], ['Security', '#security'], ['Docs', '/docs']];
   const plans = SERVICE_PLANS.filter((p) => ['free', 'starter', 'standard'].includes(p.id));
@@ -365,23 +364,16 @@ export function LandingPage() {
 
       {/* ---- Runtime band ---- */}
       <section className="k-band">
-        <span className="k-pix" style={{ left: 0, bottom: 22 }} />
-        <span className="k-pix" style={{ left: 22, bottom: 0 }} />
-        <span className="k-pix" style={{ left: 66, bottom: 0, width: 32, height: 32 }} />
-        <div>
-          <h2 className="k-h2">Bring your runtime. NAV works out the rest.</h2>
-          <p>Use your own framework, language or Dockerfile. Start from an example or deploy straight from your repository.</p>
-          <Link to="/docs" className="k-btn k-btn-solid">Browse examples <ChevronRight /></Link>
-        </div>
+        <h2 className="k-band-title">Whatever you build,<br />run it on NAV.</h2>
+        <p className="sr-only">NAV runs Node.js, Python, Go, Bun, Ruby, PHP, Rust and Deno services, frameworks such as Django, React, Vue, Angular, Svelte and Next.js, anything with a Dockerfile, and Postgres, deploying from GitHub or GitLab.</p>
         <div className="k-band-rows" aria-hidden="true">
-          {[0, 1].map((r) => {
-            const row = [...BAND.slice(r * 6), ...BAND.slice(0, r * 6)];
-            return (
-              <div key={r} className={`k-band-row${r ? ' rev' : ''}`}>
-                {[...row, ...row].map(([I, n], i) => <span key={i} className="k-chip"><I />{n}</span>)}
-              </div>
-            );
-          })}
+          {BAND_ROWS.map((row, r) => (
+            <div key={r} className="k-band-row">
+              {[...row, ...row].map((icon, i) => (
+                <span key={i} className="k-chip" title={icon.title}><BrandIcon icon={icon} /></span>
+              ))}
+            </div>
+          ))}
         </div>
       </section>
 
@@ -482,10 +474,15 @@ export function LandingPage() {
           </div>
           <div className="k-foot-bottom">
             <div className="k-foot-left">
-              <Link to="/" aria-label="NAV home" className="k-foot-mark"><LogoMark /></Link>
-              <span className={`k-status ${status}`}><i />{status === 'up' ? 'All systems operational' : status === 'down' ? 'Control plane unreachable' : 'Checking status…'}</span>
+              <Link to="/" aria-label="NAV home" className="k-foot-mark"><Logo /></Link>
+              <span className="k-foot-copy">© {new Date().getFullYear()} NAV. All rights reserved.</span>
             </div>
-            <span>© {new Date().getFullYear()} NAV. Self-hosted deployment platform.</span>
+            <nav className="k-foot-legal" aria-label="Footer">
+              <Link to="/docs">Docs</Link>
+              <Link to="/docs#security">Security</Link>
+              <Link to="/docs#self-hosting">Self-hosting</Link>
+              <Link to="/docs#changelog">Changelog</Link>
+            </nav>
           </div>
         </footer>
       </main>

@@ -1,0 +1,47 @@
+@import '@fontsource-variable/inter';
+
+/* Full-screen brand intro that sits above everything and fades into the page already rendered underneath. */
+.nav-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #000;
+  opacity: 1;
+  transition: opacity var(--intro-exit, 600ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-intro.is-exiting {
+  opacity: 0;
+  pointer-events: none;
+}
+.nav-intro .shape-waves {
+  position: absolute;
+  inset: 0;
+}
+
+/* Without WebGPU: a quiet dot field and the mark, shown only briefly. */
+.nav-intro__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background-image: radial-gradient(rgb(146 146 146 / 0.32) 1.1px, transparent 1.6px);
+  background-size: 10px 10px;
+  -webkit-mask-image: radial-gradient(70% 70% at 50% 50%, #000 30%, transparent 85%);
+  mask-image: radial-gradient(70% 70% at 50% 50%, #000 30%, transparent 85%);
+  animation: nav-intro-in 500ms ease-out both;
+}
+.nav-intro__mark {
+  height: 44px;
+  width: auto;
+  color: #fff;
+}
+@keyframes nav-intro-in {
+  from { opacity: 0; transform: scale(0.98); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-intro, .nav-intro__fallback { transition: none; animation: none; }
+}

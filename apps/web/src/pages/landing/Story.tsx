@@ -41,21 +41,29 @@ function useTick(fn: () => void, ms: number, active: boolean) {
 }
 
 /** Renders children at a fixed design size and scales them to the available width. */
-function Scaled({ w, h, children, className }: { w: number; h: number; children: ReactNode; className?: string }) {
+function Scaled({ w, h, children, className }: { w: number; h?: number; children: ReactNode; className?: string }) {
   const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
   const [s, setS] = useState(1);
+  // Without a fixed `h`, the design height is measured from the content (offsetHeight ignores the scale transform).
+  const [designH, setDesignH] = useState(h ?? 0);
   useLayoutEffect(() => {
     const el = outer.current;
-    if (!el) return;
-    const fit = () => setS(Math.min(1.15, el.clientWidth / w));
+    const content = inner.current;
+    if (!el || !content) return;
+    const fit = () => {
+      setS(Math.min(1.15, el.clientWidth / w));
+      if (h === undefined) setDesignH(content.offsetHeight);
+    };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
+    ro.observe(content);
     return () => ro.disconnect();
-  }, [w]);
+  }, [w, h]);
   return (
-    <div ref={outer} className={className} style={{ height: h * s, position: 'relative' }}>
-      <div style={{ width: w, height: h, transform: `scale(${s})`, transformOrigin: 'top left', position: 'absolute', left: 0, top: 0 }}>{children}</div>
+    <div ref={outer} className={className} style={{ height: designH * s, position: 'relative' }}>
+      <div ref={inner} style={{ width: w, height: h, transform: `scale(${s})`, transformOrigin: 'top left', position: 'absolute', left: 0, top: 0 }}>{children}</div>
     </div>
   );
 }
@@ -277,35 +285,86 @@ function NetworkMock() {
 
 /* ------------------------------------------------- 3. scaling ------------------------------------------------- */
 
-function ScaleMock() {
-  const [ref, active] = useActive<HTMLDivElement>();
-  const [phase, setPhase] = useState(reduceMotion() ? 2 : 0);
-  const [fill, setFill] = useState(0);
-  useTick(() => setPhase((p) => (p + 1) % 3), 2800, active);
-  useTick(() => setFill((f) => (phase === 1 ? Math.min(12, f + 1) : 0)), 160, active);
-  const card = (key: string, style?: CSSProperties, cls = '') => (
-    <div key={key} className={`st-card st-scale-card ${cls}`} style={style}>
+const SC_W = 240;
+const SC_H = 112;
+const SC_GAP_X = 16;
+const SC_GAP_Y = 14;
+const SC_ROW = 36;
+
+/**
+ * The loop, one frame every 700 ms. Act one scales vertically: a hardware tray of memory and CPU rows slides out
+ * under the card, grows to three rows and folds away. Act two scales horizontally: copies slide out above and below,
+ * side columns slide in from the edges, then everything collapses back into the single instance.
+ */
+const SCALE_FRAMES: { rows: number; layout: 'one' | 'col' | 'grid' }[] = [
+  { rows: 0, layout: 'one' },
+  { rows: 1, layout: 'one' },
+  { rows: 2, layout: 'one' },
+  { rows: 3, layout: 'one' },
+  { rows: 3, layout: 'one' },
+  { rows: 0, layout: 'one' },
+  { rows: 0, layout: 'one' },
+  { rows: 0, layout: 'col' },
+  { rows: 0, layout: 'col' },
+  { rows: 0, layout: 'grid' },
+  { rows: 0, layout: 'grid' },
+  { rows: 0, layout: 'grid' },
+  { rows: 0, layout: 'one' },
+  { rows: 0, layout: 'one' },
+];
+
+/** The eight replica slots around the original, as (row, column) offsets. */
+const SC_SLOTS = [-1, 0, 1].flatMap((r) => [-1, 0, 1].map((c) => [r, c] as const)).filter(([r, c]) => r || c);
+
+function ScaleCard({ style, className = '' }: { style?: CSSProperties; className?: string }) {
+  return (
+    <div className={`st-card st-sc-card ${className}`} style={style}>
       <div className="st-node-name"><BadgeTile b={B.js} />backend</div>
       <div className="st-node-status"><Check className="st-ok" /> Online</div>
     </div>
   );
+}
+
+function HardwareRow() {
+  return (
+    <div className="st-hw-row">
+      {[0, 1].map((i) => <span key={`m${i}`} className="st-ram"><i /><i /><i /><i /><i /></span>)}
+      {[0, 1, 2, 3].map((i) => <span key={`c${i}`} className="st-cpu" />)}
+    </div>
+  );
+}
+
+function ScaleMock() {
+  const [ref, active] = useActive<HTMLDivElement>();
+  const [k, setK] = useState(reduceMotion() ? 10 : 0);
+  useTick(() => setK((v) => (v + 1) % SCALE_FRAMES.length), 700, active);
+  const f = SCALE_FRAMES[k];
+  const trayH = f.rows ? f.rows * SC_ROW + 6 : 0;
   return (
     <div ref={ref}>
       <Scaled w={440} h={520} className="st-mock">
-        <div className="st-panel st-panel-scale" data-phase={phase}>
-          <div className="st-scale-one">
-            {card('one')}
-            <div className="st-meter" aria-hidden="true">
-              {['CPU', 'RAM'].map((label, r) => (
-                <div key={label} className="st-meter-row">
-                  <span>{label}</span>
-                  {Array.from({ length: 12 }, (_, i) => <i key={i} className={i < fill - r * 2 ? 'on' : ''} />)}
-                </div>
-              ))}
+        <div className="st-panel st-panel-scale">
+          {/* Replicas start stacked behind the original and slide out to their slot. */}
+          {SC_SLOTS.map(([r, c]) => {
+            const shown = f.layout === 'grid' || (f.layout === 'col' && c === 0);
+            return (
+              <ScaleCard
+                key={`${r}${c}`}
+                className={shown ? 'on' : ''}
+                style={{
+                  transform: shown ? `translate(${c * (SC_W + SC_GAP_X)}px, ${r * (SC_H + SC_GAP_Y)}px)` : 'translate(0, 0) scale(0.88)',
+                  zIndex: c === 0 ? 2 : 1,
+                  transitionDelay: shown ? `${(Math.abs(r) + Math.abs(c)) * 60}ms` : '0ms',
+                }}
+              />
+            );
+          })}
+          {/* The original, carrying the hardware tray; the pair stays centred as the tray grows. */}
+          <div className="st-sc-group" style={{ transform: `translateY(${-trayH / 2}px)` }}>
+            <ScaleCard className="on st-sc-main" />
+            <div className="st-hw" style={{ height: trayH }} aria-hidden="true">
+              {[0, 1, 2].map((i) => <HardwareRow key={i} />)}
             </div>
-          </div>
-          <div className="st-scale-grid" aria-hidden="true">
-            {Array.from({ length: 9 }, (_, i) => card(`r${i}`, { transitionDelay: `${(Math.abs((i % 3) - 1) + Math.abs(Math.floor(i / 3) - 1)) * 90}ms` }, i % 3 === 1 ? 'mid' : 'side'))}
           </div>
         </div>
       </Scaled>
@@ -346,7 +405,7 @@ const CHARTS: ChartSpec[] = [
 ];
 
 const POINTS = 42;
-const CHART_W = 286;
+const CHART_W = 250;
 const CHART_H = 112;
 const STEP = CHART_W / (POINTS - 2);
 const TICK_MS = 1000;
@@ -474,8 +533,11 @@ function LiveChart({ spec, active }: { spec: ChartSpec; active: boolean }) {
                 </g>
               ))}
         </svg>
-        <div className="st-chart-y" aria-hidden="true">
-          {ticks.slice().reverse().map((g) => <span key={g}>{(spec.max * g).toFixed(spec.max < 10 ? 1 : 0)}</span>)}
+        {/* Value labels live in their own gutter, each level with its gridline, so traces never run through them. */}
+        <div className="st-chart-y" aria-hidden="true" style={{ height: CHART_H }}>
+          {ticks.map((g) => (
+            <span key={g} style={{ top: CHART_H - g * (CHART_H - 6) - 6 }}>{(spec.max * g).toFixed(spec.max < 10 ? 1 : 0)}</span>
+          ))}
         </div>
       </div>
       <div className="st-chart-x" aria-hidden="true"><span>-40s</span><span>-20s</span><span>now</span></div>
@@ -495,7 +557,7 @@ function ObserveMock() {
   });
   return (
     <div ref={ref}>
-      <Scaled w={1000} h={720} className="st-mock">
+      <Scaled w={1000} className="st-mock">
         <Chrome project="storefront" tab="Observability">
           <div className="st-obs">
             <div className="st-obs-bar"><span className="st-chip"><AlarmClock /> Last 7 days <ChevronDown /></span><span className="st-live"><i /> Live</span></div>

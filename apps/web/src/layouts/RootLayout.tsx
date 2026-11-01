@@ -2,15 +2,20 @@ import { isRouteErrorResponse, Link, Outlet, ScrollRestoration, useLocation, use
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LogoMark } from '@/components/Logo';
 import { buttonClass } from '@/components/ui/Button';
+import { WebsiteIntro } from '@/components/WebsiteIntro';
 import { NotFoundPage } from '@/pages/NotFound';
 
 export function RootLayout() {
   const location = useLocation();
   return (
-    <ErrorBoundary resetKey={location.pathname}>
-      <Outlet />
-      <ScrollRestoration />
-    </ErrorBoundary>
+    <>
+      <ErrorBoundary resetKey={location.pathname}>
+        <Outlet />
+        <ScrollRestoration />
+      </ErrorBoundary>
+      {/* Lives beside the routes so it never remounts on navigation; the page renders underneath from the start. */}
+      <WebsiteIntro />
+    </>
   );
 }
 
