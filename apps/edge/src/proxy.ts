@@ -36,6 +36,12 @@ export interface EdgeOptions {
   connectTimeoutMs?: number;
   idleTimeoutMs?: number;
   ejectMs?: number;
+  /** Asks the control plane to wake a sleeping free instance. Must be idempotent; it is repeated while waiting. */
+  wake?: (serviceId: string) => Promise<void>;
+  /** How long a request is held while its service wakes up. */
+  wakeTimeoutMs?: number;
+  /** Interval between repeated wake signals while the service is still marked sleeping. */
+  wakeSignalMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -46,6 +52,8 @@ interface RequestCtx {
   serviceId: string | null;
   upstream: string;
   secure: boolean;
+  /** This request started a wake-up (answered with `x-nav-woke: 1`). */
+  woke: boolean;
 }
 
 // --- load balancing -----------------------------------------------------------------------------
@@ -167,16 +175,19 @@ export class Edge {
   readonly cache = new EdgeCache();
   private cacheVersions = new Map<string, string>();
   readonly balancer: Balancer;
-  private opts: Required<Omit<EdgeOptions, 'metrics' | 'acmeLookup' | 'hasCert' | 'table'>> & EdgeOptions;
+  private opts: Required<Omit<EdgeOptions, 'metrics' | 'acmeLookup' | 'hasCert' | 'table' | 'wake'>> & EdgeOptions;
   private agents = new Map<string, http.Agent>();
   private upgraded = new Set<Duplex>();
   private acmeCache = new Map<string, { value: string; at: number }>();
+  /** One wake-up per service at a time; concurrent requests wait on the same promise. */
+  private waking = new Map<string, Promise<boolean>>();
 
   constructor(opts: EdgeOptions) {
     this.table = opts.table;
     this.opts = {
       production: false, accessLog: false, forceHttps: false, httpsPort: 443, maxUrlLength: 8192,
-      connectTimeoutMs: 5_000, idleTimeoutMs: 300_000, ejectMs: 10_000, log: (m) => console.error(m),
+      connectTimeoutMs: 5_000, idleTimeoutMs: 300_000, ejectMs: 10_000, wakeTimeoutMs: 60_000, wakeSignalMs: 5_000,
+      log: (m) => console.error(m),
       ...opts,
     };
     this.balancer = new Balancer(this.opts.ejectMs);
@@ -221,7 +232,7 @@ export class Edge {
   private newCtx(req: http.IncomingMessage, secure: boolean): RequestCtx {
     const given = req.headers['x-request-id'];
     const requestId = typeof given === 'string' && REQUEST_ID_RE.test(given) ? given : randomUUID();
-    return { start: process.hrtime.bigint(), requestId, host: '-', serviceId: null, upstream: '-', secure };
+    return { start: process.hrtime.bigint(), requestId, host: '-', serviceId: null, upstream: '-', secure, woke: false };
   }
 
   private finish(req: http.IncomingMessage, res: http.ServerResponse, rc: RequestCtx): void {
@@ -316,7 +327,52 @@ export class Edge {
       });
       return;
     }
+    if (this.asleep(route)) { void this.wakeThenProxy(req, res, route, rc); return; }
     this.proxyToService(req, res, route, rc, 0);
+  }
+
+  // --- free instance sleep ------------------------------------------------------------------------
+
+  /** A sleeping web service, or one whose wake-up is still in progress. */
+  private asleep(route: Route): boolean {
+    return route.type === 'web' && (route.sleeping || this.waking.has(route.serviceId));
+  }
+
+  /**
+   * Resolves true once the service is awake with a healthy upstream, false after `wakeTimeoutMs` (or if the
+   * service went away / was suspended). The first caller starts the wake; later ones share it.
+   */
+  private wakeUp(route: Route, host: string, rc: RequestCtx): Promise<boolean> {
+    const pending = this.waking.get(route.serviceId);
+    if (pending) return pending;
+    rc.woke = true;
+    const id = route.serviceId;
+    const p = (async () => {
+      const deadline = Date.now() + this.opts.wakeTimeoutMs;
+      let nextSignal = 0;
+      while (Date.now() < deadline) {
+        const r = this.table.lookup(host)?.route;
+        if (!r || r.serviceId !== id || r.suspended) return false;
+        if (!r.sleeping && r.upstreams.some((u) => this.balancer.isHealthy(u))) return true;
+        // Repeat the signal while the control plane has not picked it up (missed NOTIFY, control restart).
+        if (r.sleeping && Date.now() >= nextSignal) {
+          nextSignal = Date.now() + this.opts.wakeSignalMs;
+          this.opts.wake?.(id).catch((err) => this.opts.log(`[edge] wake signal for ${id} failed: ${(err as Error).message}`));
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      return false;
+    })().finally(() => this.waking.delete(id));
+    this.waking.set(id, p);
+    return p;
+  }
+
+  private async wakeThenProxy(req: http.IncomingMessage, res: http.ServerResponse, route: Route, rc: RequestCtx): Promise<void> {
+    const ok = await this.wakeUp(route, rc.host, rc);
+    if (res.destroyed || res.headersSent) return;
+    const fresh = this.table.lookup(rc.host)?.route;
+    if (!ok || !fresh) { this.page(req, res, rc, 'waking', { 'retry-after': '10' }); return; }
+    this.proxyToService(req, res, fresh, rc, 0);
   }
 
   private async serveAcme(req: http.IncomingMessage, res: http.ServerResponse, rc: RequestCtx, token: string): Promise<void> {
@@ -429,6 +485,7 @@ export class Edge {
       if (connectTimer) clearTimeout(connectTimer);
       const extra: [string, string][] = [['x-request-id', rc.requestId]];
       if (!this.opts.production) extra.push(['nav-routing', t.label]);
+      if (rc.woke) extra.push(['x-nav-woke', '1']);
       const ttl = t.cache && req.method === 'GET' && pres.statusCode === 200 ? freshFor(pres.headers, t.cache.maxTtlSeconds) : 0;
       if (t.cache) extra.push(['x-nav-cache', ttl > 0 ? 'MISS' : 'BYPASS']);
       if (ttl > 0 && Number(pres.headers['content-length'] ?? 0) <= MAX_BODY) {
@@ -504,7 +561,16 @@ export class Edge {
     if (route.type === 'static') return fail('static_not_found');
     this.upgraded.add(socket);
     socket.once('close', () => this.upgraded.delete(socket));
+    if (this.asleep(route)) { void this.wakeThenUpgrade(req, socket, head, route, rc); return; }
     this.connectUpgrade(req, socket, head, route, rc, 0);
+  }
+
+  private async wakeThenUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, route: Route, rc: RequestCtx): Promise<void> {
+    const ok = await this.wakeUp(route, rc.host, rc);
+    if (socket.destroyed) return;
+    const fresh = this.table.lookup(rc.host)?.route;
+    if (!ok || !fresh) { this.logUpgrade(req, rc, 503); socket.end(rawPage('waking', rc.requestId)); return; }
+    this.connectUpgrade(req, socket, head, fresh, rc, 0);
   }
 
   private logUpgrade(req: http.IncomingMessage, rc: RequestCtx, status: number): void {
@@ -536,6 +602,7 @@ export class Edge {
       socket.off('close', onClientGone);
       const extra: [string, string][] = [['x-request-id', rc.requestId]];
       if (!this.opts.production) extra.push(['nav-routing', up.id]);
+      if (rc.woke) extra.push(['x-nav-woke', '1']);
       // keep Connection/Upgrade for the 101 handshake
       const lines = [`HTTP/1.1 ${pres.statusCode ?? 101} ${pres.statusMessage || 'Switching Protocols'}`];
       const raw = pres.rawHeaders;

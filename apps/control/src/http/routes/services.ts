@@ -10,6 +10,7 @@ import { cancelDeploy, createDeploy, serviceOp } from '../../lib/deploys.ts';
 import { listEnv, listFiles, patchEnv, replaceEnv, replaceFiles } from '../../lib/env.ts';
 import { createPreview, createService, markForDeletion, validateCron, validateDisk, validatePlan } from '../../lib/services.ts';
 import { validateRepoUrl } from '../../lib/git.ts';
+import { wakeService } from '../../lib/sleep.ts';
 import { atLeast, requireUser, scoped, workspaceRole } from '../auth.ts';
 import { onChange, onLog, openSse } from '../sse.ts';
 
@@ -258,7 +259,9 @@ export async function serviceRoutes(app: FastifyInstance) {
       await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: user.id, kind: 'scaled', data: { from: svc.instance_count, to: body.instanceCount } });
     }
     if (body.plan && body.plan !== svc.plan) {
-      await serviceOp(row!, 'restart');
+      // Paid plans never sleep: a sleeping service is started on its new plan instead of restarted.
+      const woke = body.plan !== 'free' && (await wakeService(svc.id, { reason: 'plan_changed', actorId: user.id }));
+      if (!woke) await serviceOp(row!, 'restart');
       await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: user.id, kind: 'plan_changed', data: { from: svc.plan, to: body.plan } });
     }
     if (body.staticRoutes || body.staticHeaders || body.maintenanceMode !== undefined || body.ipAllowList || body.edgeCache) await notify('nav_routes');
@@ -286,7 +289,7 @@ export async function serviceRoutes(app: FastifyInstance) {
   app.post('/services/:id/resume', async (req) => {
     const { svc } = await svcFor(req, 'developer');
     if (!svc.suspended) throw conflict('service is not suspended');
-    const row = await one("UPDATE services SET suspended = false, status = CASE WHEN current_deploy_id IS NULL THEN 'created' ELSE 'deploying' END, updated_at = now() WHERE id = $1 RETURNING *", [svc.id]);
+    const row = await one("UPDATE services SET suspended = false, sleeping = false, status = CASE WHEN current_deploy_id IS NULL THEN 'created' ELSE 'deploying' END, updated_at = now() WHERE id = $1 RETURNING *", [svc.id]);
     if (row!.current_deploy_id) await serviceOp(row!, 'scale');
     else await createDeploy(row!, { trigger: 'manual', actorId: requireUser(req).id });
     await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: requireUser(req).id, kind: 'resumed' });
@@ -304,7 +307,8 @@ export async function serviceRoutes(app: FastifyInstance) {
   app.post('/services/:id/restart', async (req) => {
     const { svc } = await svcFor(req, 'developer');
     if (!svc.current_deploy_id || svc.suspended) throw conflict('service has no running deploy');
-    await serviceOp(svc, 'restart');
+    // Restarting a sleeping free instance just wakes it.
+    if (!(await wakeService(svc.id, { reason: 'restart', actorId: requireUser(req).id }))) await serviceOp(svc, 'restart');
     await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: requireUser(req).id, kind: 'restarted' });
     return { ok: true };
   });

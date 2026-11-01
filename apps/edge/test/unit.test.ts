@@ -158,11 +158,18 @@ test('Metrics buckets and flush SQL; failures are swallowed and retained', async
   assert.deepEqual([snap[0].requests, snap[0].s2xx, snap[0].s5xx, snap[0].latencySum, snap[0].latencyMax, snap[0].bytesOut], [2, 1, 1, 40, 30, 150]);
   await m.flush(); // fails, data kept (minutes are old relative to now -> dropped by the 15 min cutoff)
   fail = false;
-  m.record('s2', 302, 1, 1);
+  const t1 = Date.now();
+  m.record('s2', 302, 1, 1, t1);
   await m.flush();
-  assert.equal(queries.length, 1);
-  assert.match(queries[0].text, /ON CONFLICT \(service_id, minute\) DO UPDATE SET/);
-  assert.match(queries[0].text, /requests = http_metrics\.requests \+ EXCLUDED\.requests/);
-  assert.equal(queries[0].values?.[0], 's2');
+  // The failed flush kept s1's last request time; both services' times are written before the buckets.
+  assert.equal(queries.length, 2);
+  assert.match(queries[0].text, /UPDATE services s SET last_request_at/);
+  const [ids, times] = queries[0].values as [string[], string[]];
+  assert.deepEqual(new Map(ids.map((id, i) => [id, times[i]])), new Map([['s1', new Date(t0 + 60_000).toISOString()], ['s2', new Date(t1).toISOString()]]));
+  assert.match(queries[1].text, /ON CONFLICT \(service_id, minute\) DO UPDATE SET/);
+  assert.match(queries[1].text, /requests = http_metrics\.requests \+ EXCLUDED\.requests/);
+  assert.equal(queries[1].values?.[0], 's2');
   assert.equal(m.snapshot().length, 0);
+  await m.flush();
+  assert.equal(queries.length, 2, 'nothing left to write');
 });

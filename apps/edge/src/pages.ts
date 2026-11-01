@@ -14,7 +14,8 @@ export type PageKind =
   | 'method_not_allowed'
   | 'static_not_found'
   | 'range_not_satisfiable'
-  | 'ip_blocked';
+  | 'ip_blocked'
+  | 'waking';
 
 interface PageDef { status: number; code: string; title: string; message: string }
 
@@ -23,6 +24,7 @@ export const PAGES: Record<PageKind, PageDef> = {
   suspended: { status: 503, code: 'service_suspended', title: 'This service has been suspended', message: 'The owner of this service has suspended it. If you own it, resume it from the NAV dashboard.' },
   maintenance: { status: 503, code: 'maintenance', title: 'Down for maintenance', message: 'This service is undergoing scheduled maintenance. Please check back shortly.' },
   no_upstream: { status: 503, code: 'no_healthy_instances', title: 'Service is starting', message: 'No healthy instances are available right now. If a deploy is in progress, this page will be replaced as soon as the service is live.' },
+  waking: { status: 503, code: 'service_waking', title: 'Waking up — retry shortly', message: 'This free instance spun down after a period without traffic and is starting again. Retry in a few seconds.' },
   bad_gateway: { status: 502, code: 'bad_gateway', title: 'Bad gateway', message: 'The service did not return a valid response. Please try again in a moment.' },
   gateway_timeout: { status: 504, code: 'gateway_timeout', title: 'Gateway timeout', message: 'The service took too long to respond.' },
   bad_request: { status: 400, code: 'bad_request', title: 'Bad request', message: 'The request could not be understood by the edge.' },
@@ -86,7 +88,7 @@ export function sendPage(
     'x-content-type-options': 'nosniff',
     ...extraHeaders,
   };
-  if (b.status === 503) headers['retry-after'] = '5';
+  if (b.status === 503 && headers['retry-after'] === undefined) headers['retry-after'] = '5';
   res.writeHead(b.status, headers);
   res.end(req.method === 'HEAD' ? undefined : b.body);
 }
@@ -95,5 +97,6 @@ export function sendPage(
 export function rawPage(kind: PageKind, requestId?: string): string {
   const b = pageBody(kind, false, requestId);
   return `HTTP/1.1 ${b.status} ${PAGES[kind].title.replace(/[^\x20-\x7e]/g, '')}\r\n` +
-    `content-type: ${b.contentType}\r\ncontent-length: ${Buffer.byteLength(b.body)}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n${b.body}`;
+    `content-type: ${b.contentType}\r\ncontent-length: ${Buffer.byteLength(b.body)}\r\ncache-control: no-store\r\n` +
+    `${kind === 'waking' ? 'retry-after: 10\r\n' : ''}connection: close\r\n\r\n${b.body}`;
 }

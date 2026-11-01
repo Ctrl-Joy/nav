@@ -7,6 +7,7 @@ import { startScheduler } from './scheduler/index.ts';
 import { startControlJobs } from './scheduler/jobs.ts';
 import { startLogStreams, startMetricsStreams } from './scheduler/streams.ts';
 import { startNotifier } from './scheduler/notifier.ts';
+import { startWakeListener } from './lib/sleep.ts';
 
 if (!process.env.NAV_MASTER_KEY) {
   console.error('NAV_MASTER_KEY must be set (64 hex chars). Use `npm run dev` for local development.');
@@ -22,6 +23,7 @@ startNotifier();
 startControlJobs();
 startLogStreams();
 startMetricsStreams();
+startWakeListener();
 
 const shutdown = async () => {
   await app.close().catch(() => {});

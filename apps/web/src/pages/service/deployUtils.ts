@@ -72,6 +72,10 @@ export function describeEvent(e: NavEvent): string {
       return 'Service resumed';
     case 'restarted':
       return 'Service restarted';
+    case 'service_slept':
+      return `Spun down after ${str(d.idleMinutes) ?? '15'} minutes without traffic`;
+    case 'service_woke':
+      return d.reason === 'request' ? 'Woken up by an incoming request' : 'Woken up';
     case 'rollback':
       return 'Rollback started';
     case 'plan_changed':

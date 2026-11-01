@@ -7,6 +7,7 @@ import { SERVICE_PLANS } from '@nav/shared';
 import { notify, pool, q } from '../db/pool.ts';
 import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
+import { sleepIdleServices } from '../lib/sleep.ts';
 import { deleteStoredArtifact } from '@nav/shared/artifacts';
 import { snapshotJob } from '../http/routes/snapshots.ts';
 
@@ -101,7 +102,7 @@ async function reconcileTick(): Promise<void> {
   }
   const drift = await q(
     `SELECT s.id FROM services s
-     WHERE s.type IN ('web','private','worker') AND NOT s.suspended AND s.status IN ('live','failed') AND s.current_deploy_id IS NOT NULL
+     WHERE s.type IN ('web','private','worker') AND NOT s.suspended AND NOT s.sleeping AND s.status IN ('live','failed') AND s.current_deploy_id IS NOT NULL
        AND (SELECT count(*) FROM instances i WHERE i.service_id = s.id AND i.deploy_id = s.current_deploy_id AND i.status IN ('pending','starting','healthy','unhealthy','crashed')) <> s.instance_count
        AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.concurrency_key = 'svc:' || s.id AND j.status IN ('queued','running'))`,
   );
@@ -183,4 +184,5 @@ export function startScheduler(): void {
   every('reconcile', 15_000, 9003, reconcileTick);
   every('housekeeping', 10 * 60_000, 9004, housekeepingTick);
   every('daily', 60 * 60_000, 9005, dailyTick);
+  every('free-sleep', 60_000, 9006, async () => { await sleepIdleServices(); });
 }
