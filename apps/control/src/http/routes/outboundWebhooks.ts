@@ -12,11 +12,11 @@ import { workspaceRole } from '../auth.ts';
 
 /** Event types a webhook can subscribe to (the same kinds as the activity feed). */
 export const WEBHOOK_EVENTS = [
-  'deploy_live', 'deploy_failed', 'deploy_canceled', 'service_created', 'service_deleted', 'settings_updated', 'env_updated',
+  'deploy_live', 'deploy_failed', 'deploy_canceled', 'deploy_waiting_for_checks', 'deploy_skipped_checks_failed', 'service_created', 'service_deleted', 'settings_updated', 'env_updated',
   'plan_changed', 'scaled', 'autoscaled', 'restarted', 'suspended', 'resumed', 'instance_crashed', 'cron_failed',
   'database_created', 'database_available', 'database_updated', 'database_failed', 'database_deleted', 'database_restore_started', 'database_restored',
   'domain_added', 'domain_verified', 'domain_removed', 'certificate_issued', 'env_group_created', 'env_group_updated', 'env_group_deleted',
-  'blueprint_created', 'blueprint_synced', 'project_created', 'member_added',
+  'blueprint_created', 'blueprint_synced', 'preview_environment_requested', 'preview_environment_deleted', 'project_created', 'member_added',
 ];
 
 const newSecret = () => `whsec_${randomBytes(24).toString('base64')}`;

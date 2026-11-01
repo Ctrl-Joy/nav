@@ -1,0 +1,6 @@
+# "Deploy to NAV" blueprint for this repository: a static site built into dist/.
+services:
+  - type: static
+    name: static-site
+    buildCommand: npm run build
+    staticPublishPath: dist

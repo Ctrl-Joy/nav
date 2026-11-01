@@ -6,8 +6,10 @@ import { HttpError, enqueue, notFound } from '../../lib/core.ts';
 import * as ser from '../../lib/serialize.ts';
 import { createDeploy } from '../../lib/deploys.ts';
 import { createPreview, markForDeletion } from '../../lib/services.ts';
-import { commentOnPr, verifyWebhookSignature } from '../../lib/github.ts';
+import { verifyWebhookSignature } from '../../lib/github.ts';
 import { matchesBuildFilter } from '../../lib/filters.ts';
+import { awaitChecks, eventVerdict, onChecksEvent } from '../../lib/checks.ts';
+import { deletePreviewEnvironment, requestPreviewEnvironment } from '../../lib/previews.ts';
 
 const norm = (url: string) => url.toLowerCase().replace(/\.git$/, '').replace(/\/$/, '');
 
@@ -41,17 +43,31 @@ export async function webhookRoutes(app: FastifyInstance) {
       const message: string = head?.message ?? '';
       if (/\[(skip ci|ci skip|skip nav|nav skip)\]/i.test(message)) return { ok: true, skipped: 'skip marker in commit message' };
       const changedFiles: string[] = (body.commits ?? []).flatMap((c: any) => [...(c.added ?? []), ...(c.modified ?? []), ...(c.removed ?? [])]);
-      const svcs = await q("SELECT * FROM services WHERE lower(regexp_replace(repo_url, '\\.git$', '')) = $1 AND branch = $2 AND auto_deploy = 'commit' AND NOT suspended AND status <> 'deleting'", [repoUrl, branch]);
+      const svcs = await q("SELECT * FROM services WHERE lower(regexp_replace(repo_url, '\\.git$', '')) = $1 AND branch = $2 AND auto_deploy IN ('commit','checks') AND NOT suspended AND status <> 'deleting'", [repoUrl, branch]);
       const deploys = [];
+      const waiting = [];
       for (const s of svcs) {
         if (!matchesBuildFilter(s.root_dir, s.build_filter, changedFiles)) continue;
         if (body.installation?.id && !s.installation_id) await q('UPDATE services SET installation_id = $2 WHERE id = $1', [s.id, body.installation.id]);
-        const d = await createDeploy(s, { trigger: 'git_push', commitSha: body.after, commitMessage: message.split('\n')[0].slice(0, 500), commitAuthor: head?.author?.name ?? head?.author?.username ?? null });
+        const commit = { sha: body.after as string, message: message.split('\n')[0].slice(0, 500), author: head?.author?.name ?? head?.author?.username ?? null };
+        if (s.auto_deploy === 'checks') {
+          await awaitChecks(s, commit);
+          waiting.push(s.id);
+          continue;
+        }
+        const d = await createDeploy(s, { trigger: 'git_push', commitSha: commit.sha, commitMessage: commit.message, commitAuthor: commit.author });
         deploys.push(d.id);
       }
       const bps = await q('SELECT id FROM blueprints WHERE lower(repo_url) = $1 AND branch = $2 AND auto_sync', [repoUrl, branch]);
       for (const bp of bps) await enqueue('blueprint_sync', { blueprintId: bp.id }, { concurrencyKey: `bp:${bp.id}` });
-      return { ok: true, deploys, blueprints: bps.length };
+      return { ok: true, deploys, waitingForChecks: waiting, blueprints: bps.length };
+    }
+
+    // CI results for a commit: deploy services that were waiting on them ('checks' auto-deploy).
+    if ((event === 'check_suite' || event === 'check_run' || event === 'status') && repoUrl) {
+      const v = eventVerdict(event, body);
+      if (!v) return { ok: true, skipped: 'not a completed check' };
+      return { ok: true, ...(await onChecksEvent(repoUrl, v.sha, body.installation?.id ?? null, v.verdict)) };
     }
 
     if (event === 'pull_request' && repoUrl) {
@@ -65,13 +81,26 @@ export async function webhookRoutes(app: FastifyInstance) {
           const exists = await one('SELECT 1 FROM services WHERE parent_service_id = $1 AND pr_number = $2', [parent.id, pr.number]);
           if (!automatic && !labeled && !exists) continue;
           if (/\[(skip preview|preview skip)\]/i.test(pr.title ?? '')) continue;
-          const { service } = await createPreview(parent, pr.head.ref, pr.number, null, pr.head.sha);
-          if (body.action === 'opened') {
-            await commentOnPr(parent.installation_id, parent.repo_url, pr.number, `🧭 **NAV preview** for \`${parent.name}\` is deploying: ${ser.service(service).url ?? service.slug}`).catch(() => {});
-          }
+          // The PR comment (one per preview, kept up to date) is written by the notifier from the deploy events.
+          await createPreview(parent, pr.head.ref, pr.number, null, pr.head.sha);
         } else if (body.action === 'closed') {
-          const previews = await q('SELECT * FROM services WHERE parent_service_id = $1 AND pr_number = $2', [parent.id, pr.number]);
+          const previews = await q("SELECT * FROM services WHERE parent_service_id = $1 AND pr_number = $2 AND status <> 'deleting'", [parent.id, pr.number]);
           for (const p of previews) await markForDeletion(p, null);
+        }
+      }
+
+      // Blueprint preview environments: the whole stack per PR.
+      const bps = await q("SELECT * FROM blueprints WHERE lower(regexp_replace(repo_url, '\\.git$', '')) = $1 AND branch = $2 AND previews->>'generation' <> 'off'", [repoUrl, base]);
+      for (const bp of bps) {
+        const env = await one('SELECT * FROM preview_environments WHERE blueprint_id = $1 AND pr_number = $2', [bp.id, pr.number]);
+        if (['opened', 'reopened', 'synchronize', 'labeled'].includes(body.action)) {
+          const labeled = (pr.labels ?? []).some((l: any) => l.name === 'nav-preview');
+          if (bp.previews.generation !== 'automatic' && !labeled && !env) continue;
+          if (body.action === 'labeled' && env) continue;
+          if (/\[(skip preview|preview skip)\]/i.test(pr.title ?? '')) continue;
+          await requestPreviewEnvironment(bp, { number: pr.number, title: pr.title ?? null, headRef: pr.head.ref, headSha: pr.head.sha ?? null });
+        } else if (body.action === 'closed' && env) {
+          await deletePreviewEnvironment(env, null);
         }
       }
       return { ok: true };

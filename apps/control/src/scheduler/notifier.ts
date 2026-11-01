@@ -8,10 +8,19 @@ import { decrypt } from '@nav/shared/crypto';
 import { listen, one, q, type Row } from '../db/pool.ts';
 import { layout, sendMail } from '../lib/mail.ts';
 import { assertPublicUrl } from '../lib/targets.ts';
+import { syncPreviewComment } from '../lib/previews.ts';
 
 const OUTCOMES: Record<string, 'success' | 'failure'> = { deploy_live: 'success', deploy_failed: 'failure', database_failed: 'failure', cron_failed: 'failure', instance_crashed: 'failure' };
 /** Retry schedule after a failed delivery (then the delivery is marked failed). */
 const BACKOFF_S = [10, 60, 300, 1800, 7200];
+/** Deploy events that refresh a preview's pull request comment. */
+const PREVIEW_COMMENT_EVENTS = new Set(['deploy_started', 'deploy_live', 'deploy_failed']);
+
+// PR comment updates run one at a time, so two events of one preview never both create a comment.
+let commentChain: Promise<void> = Promise.resolve();
+function queuePreviewComment(serviceId: string): void {
+  commentChain = commentChain.then(() => syncPreviewComment(serviceId)).catch((err) => console.error('[notifier] preview comment:', (err as Error).message));
+}
 
 export function eventPayload(e: Row): Record<string, unknown> {
   return {
@@ -120,6 +129,7 @@ export function startNotifier(): void {
     for (const e of rows) {
       lastId = Math.max(lastId, Number(e.id));
       await enqueueWebhooks(e).catch((err) => console.error('[notifier] webhooks:', err.message));
+      if (e.service_id && PREVIEW_COMMENT_EVENTS.has(e.kind)) queuePreviewComment(e.service_id);
       const outcome = OUTCOMES[e.kind];
       if (!outcome) continue;
       void slack(e, outcome);

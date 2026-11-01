@@ -1,0 +1,9 @@
+# "Deploy to NAV" blueprint for this repository: one Node web service.
+services:
+  - type: web
+    name: node-web
+    runtime: node
+    healthCheckPath: /healthz
+    envVars:
+      - key: GREETING
+        value: Hello from a NAV template

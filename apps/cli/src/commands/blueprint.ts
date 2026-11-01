@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { Blueprint } from '@nav/shared';
+import type { Blueprint, PreviewEnvironment } from '@nav/shared';
 import { parseCommandArgs, requireFlag } from '../args.ts';
 import { listAll } from '../api.ts';
 import type { CommandDef } from '../command.ts';
@@ -11,6 +11,7 @@ import { dim, green, out, printJson, red, statusText } from '../output.ts';
 const VALIDATE_USAGE = 'nav blueprint validate [file] [--json]';
 const LAUNCH_USAGE = 'nav blueprint launch --repo URL [--branch main] [--file nav.yaml] [--name NAME] [--json]';
 const SYNC_USAGE = 'nav blueprint sync <id|name> [--json]';
+const PREVIEWS_USAGE = 'nav blueprint previews <id|name> [--delete <previewId|prNumber>] [--json]';
 
 interface PlanResponse {
   valid: boolean;
@@ -124,16 +125,48 @@ async function sync(argv: string[]): Promise<void> {
   if (result?.lastError) out(red(result.lastError));
 }
 
+async function previews(argv: string[]): Promise<void> {
+  const args = parseCommandArgs(argv, { delete: { type: 'string' } });
+  const ref = args.arg(0, 'blueprint', PREVIEWS_USAGE);
+  args.maxPositionals(1, PREVIEWS_USAGE);
+  const ctx = await workspaceContext();
+  const items = await listAll<Blueprint>(ctx.client, `/workspaces/${ctx.workspaceId}/blueprints`);
+  const blueprint = matchByRef(items, ref, 'blueprint', 'run nav blueprint launch to create one');
+  const envs = (await ctx.client.get<{ items: PreviewEnvironment[] }>(`/blueprints/${blueprint.id}/previews`)).items;
+  const del = args.str('delete');
+  if (del) {
+    const env = envs.find((e) => e.id === del || String(e.prNumber) === del.replace(/^#/, ''));
+    if (!env) throw new CliError(`no preview environment "${del}" on ${blueprint.name}`, 'pass a preview id or PR number from nav blueprint previews');
+    await ctx.client.del(`/blueprint-previews/${env.id}`);
+    out(`${green('Deleting')} the preview environment for PR #${env.prNumber}`);
+    return;
+  }
+  if (args.bool('json')) {
+    printJson(envs);
+    return;
+  }
+  if (!envs.length) {
+    out(dim(`No preview environments for ${blueprint.name}`));
+    return;
+  }
+  for (const e of envs) {
+    out(`PR #${e.prNumber}  ${statusText(e.status)}  ${dim(e.id)}  ${e.prTitle ?? ''}`);
+    for (const r of e.resources) out(`  ${r.type.padEnd(9)} ${r.name}${r.url ? `  ${r.url}` : ''}`);
+    if (e.error) out(red(`  ${e.error}`));
+  }
+}
+
 async function blueprintCommand(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;
   switch (sub) {
     case 'validate': return validate(rest);
     case 'launch': return launch(rest);
     case 'sync': return sync(rest);
+    case 'previews': return previews(rest);
     default:
       throw new UsageError(
         sub === undefined ? 'missing blueprint subcommand' : `unknown blueprint subcommand "${sub}"`,
-        'subcommands: validate, launch, sync',
+        'subcommands: validate, launch, sync, previews',
       );
   }
 }
@@ -142,7 +175,7 @@ export const blueprintCommands: CommandDef[] = [
   {
     name: 'blueprint',
     summary: 'Validate, launch and sync nav.yaml blueprints',
-    usage: [VALIDATE_USAGE, LAUNCH_USAGE, SYNC_USAGE],
+    usage: [VALIDATE_USAGE, LAUNCH_USAGE, SYNC_USAGE, PREVIEWS_USAGE],
     run: blueprintCommand,
   },
 ];

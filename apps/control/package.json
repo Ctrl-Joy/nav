@@ -7,7 +7,7 @@
     "start": "node src/main.ts",
     "agent": "node src/agent/main.ts",
     "migrate": "node src/db/migrate.ts",
-    "test": "node --test test/"
+    "test": "node --test \"test/**/*.test.ts\""
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",

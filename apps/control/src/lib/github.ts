@@ -104,6 +104,79 @@ export async function commentOnPr(installationId: number | null, repoUrl: string
   await gh(`/repos/${r.owner}/${r.repo}/issues/${pr}/comments`, { method: 'POST', token, body: JSON.stringify({ body }) });
 }
 
+/**
+ * Creates or updates the single comment identified by `marker` (an HTML comment hidden in its body) on a PR.
+ * Only comments written by a bot (our App) are considered, so a user quoting the marker cannot hijack it.
+ */
+export async function upsertPrComment(installationId: number | null, repoUrl: string, pr: number, marker: string, body: string): Promise<void> {
+  if (!installationId || !githubAppEnabled()) return;
+  const r = parseGithubRepo(repoUrl);
+  if (!r) return;
+  const token = await installationToken(installationId);
+  const full = `${marker}\n${body}`;
+  for (let page = 1; page <= 10; page++) {
+    const comments = await gh<{ id: number; body?: string; user?: { type?: string } }[]>(`/repos/${r.owner}/${r.repo}/issues/${pr}/comments?per_page=100&page=${page}`, { token });
+    const mine = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes(marker));
+    if (mine) {
+      if (mine.body !== full) await gh(`/repos/${r.owner}/${r.repo}/issues/comments/${mine.id}`, { method: 'PATCH', token, body: JSON.stringify({ body: full }) });
+      return;
+    }
+    if (comments.length < 100) break;
+  }
+  await gh(`/repos/${r.owner}/${r.repo}/issues/${pr}/comments`, { method: 'POST', token, body: JSON.stringify({ body: full }) });
+}
+
+export interface PreviewCommentRow { name: string; status: string; url: string | null; dashboardUrl: string }
+
+const STATUS_LABEL: Record<string, string> = { live: '✅ Live', failed: '❌ Failed', canceled: '⏹️ Canceled', deploying: '⏳ Deploying', created: '⏳ Deploying', deleting: '🗑️ Deleted' };
+
+/** Markdown for a preview comment: one row per service of the preview (one for a single-service preview). */
+export function previewCommentBody(title: string, rows: PreviewCommentRow[]): string {
+  const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  const lines = [
+    `### 🧭 NAV preview: ${cell(title)}`,
+    '',
+    '| Service | Status | Preview URL | |',
+    '| --- | --- | --- | --- |',
+    ...rows.map((r) => `| ${cell(r.name)} | ${STATUS_LABEL[r.status] ?? cell(r.status)} | ${r.url ? `[${r.url.replace(/^https?:\/\//, '')}](${r.url})` : '—'} | [Dashboard](${r.dashboardUrl}) |`),
+    '',
+    `<sub>Updated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC. This comment is updated as the preview deploys.</sub>`,
+  ];
+  return lines.join('\n');
+}
+
+export interface CommitStatus { context: string; state: string }
+export interface CheckRun { name: string; status: string; conclusion: string | null }
+
+/** Check conclusions that count as passing: success, neutral or skipped. */
+const PASSING = new Set(['success', 'neutral', 'skipped']);
+
+/**
+ * Folds a commit's legacy statuses and check runs into one verdict. Our own "NAV" status is ignored (it reflects
+ * other services' deploys of the same commit, not CI). Anything still running makes the verdict pending.
+ */
+export function evaluateChecks(statuses: CommitStatus[], runs: CheckRun[]): 'success' | 'pending' | 'failure' {
+  const ci = statuses.filter((s) => s.context !== 'NAV');
+  if (ci.some((s) => s.state === 'failure' || s.state === 'error') || runs.some((r) => r.status === 'completed' && !PASSING.has(r.conclusion ?? ''))) return 'failure';
+  if (ci.some((s) => s.state === 'pending') || runs.some((r) => r.status !== 'completed')) return 'pending';
+  return 'success';
+}
+
+/** Current statuses and check runs of a commit, read with the installation token. */
+export async function commitChecks(installationId: number, repoUrl: string, sha: string): Promise<{ statuses: CommitStatus[]; runs: CheckRun[] }> {
+  const r = parseGithubRepo(repoUrl);
+  if (!r) throw new Error(`not a GitHub repository: ${repoUrl}`);
+  const token = await installationToken(installationId);
+  const combined = await gh<{ statuses: CommitStatus[] }>(`/repos/${r.owner}/${r.repo}/commits/${sha}/status?per_page=100`, { token });
+  const runs: CheckRun[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const res = await gh<{ check_runs: CheckRun[] }>(`/repos/${r.owner}/${r.repo}/commits/${sha}/check-runs?per_page=100&page=${page}`, { token });
+    runs.push(...res.check_runs);
+    if (res.check_runs.length < 100) break;
+  }
+  return { statuses: combined.statuses ?? [], runs };
+}
+
 export function verifyWebhookSignature(raw: Buffer, signature: string | undefined): boolean {
   if (!config.github.webhookSecret || !signature?.startsWith('sha256=')) return false;
   const expected = Buffer.from('sha256=' + createHmac('sha256', config.github.webhookSecret).update(raw).digest('hex'));

@@ -1,12 +1,15 @@
 // Docker driver: immutable images per deploy, hardened containers, per-workspace bridge networks.
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import Docker from 'dockerode';
 import tar from 'tar-stream';
 import { config } from '@nav/shared/config';
 import { pipeLines } from '../util.ts';
+import type { SecretFile } from '@nav/shared';
 import type { Artifact, BuildContext, Driver, ExecSession, Handle, StartSpec, Usage } from './types.ts';
 
 export const DEFAULT_CONTAINER_PORT = 10000;
@@ -51,6 +54,69 @@ export function nativeDockerfile(runtime: string, build: string | null, start: s
     start ? `CMD ${shellQuote(start)}` : '',
   ];
   return lines.filter(Boolean).join('\n') + '\n';
+}
+
+/** True when a Dockerfile mounts BuildKit secrets (`RUN --mount=type=secret,id=NAME ...`). */
+export function usesBuildSecrets(dockerfile: string): boolean {
+  return /--mount=\S*type=secret/.test(dockerfile);
+}
+
+/** BuildKit secret ids: env var names as-is, secret files by filename (both must be safe to pass in --secret). */
+export function buildSecrets(env: Record<string, string>, files: SecretFile[]): { id: string; content: string }[] {
+  const out = new Map<string, string>();
+  for (const [k, v] of Object.entries(env)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) out.set(k, v);
+  // A secret file wins over an env var of the same name.
+  for (const f of files) if (/^[A-Za-z0-9._-]+$/.test(f.filename)) out.set(f.filename, f.content);
+  return [...out].map(([id, content]) => ({ id, content }));
+}
+
+export interface BuildxOptions {
+  tag: string;
+  dockerfile: string;        // absolute path
+  contextDir: string;
+  /** Secret id → temp file holding its value (outside the build context). */
+  secrets: { id: string; src: string }[];
+  buildArgs: Record<string, string>;
+  labels: Record<string, string>;
+  noCache: boolean;
+}
+
+/**
+ * `docker buildx build` arguments. Secrets are only ever referenced by file (`--secret id=..,src=..`): BuildKit
+ * mounts them for the RUN steps that ask for them and never writes them to a layer, the image config or history.
+ */
+export function buildxArgs(o: BuildxOptions): string[] {
+  const args = ['buildx', 'build', '--progress=plain', '--load', '-t', o.tag, '-f', o.dockerfile];
+  for (const [k, v] of Object.entries(o.labels)) args.push('--label', `${k}=${v}`);
+  for (const [k, v] of Object.entries(o.buildArgs)) args.push('--build-arg', `${k}=${v}`);
+  for (const s of o.secrets) args.push('--secret', `id=${s.id},src=${s.src}`);
+  if (o.noCache) args.push('--no-cache');
+  args.push(o.contextDir);
+  return args;
+}
+
+/** Runs a BuildKit build with the service's env vars and secret files as build secrets; temp files are removed after. */
+async function buildWithSecrets(ctx: BuildContext, o: Omit<BuildxOptions, 'secrets'>): Promise<void> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'nav-secrets-'));
+  try {
+    const secrets: BuildxOptions['secrets'] = [];
+    for (const [i, s] of buildSecrets(ctx.env, ctx.files).entries()) {
+      const src = path.join(dir, `s${i}`);
+      await writeFile(src, s.content, { mode: 0o600 });
+      secrets.push({ id: s.id, src });
+    }
+    ctx.log(`==> Building with BuildKit (${secrets.length} build secret${secrets.length === 1 ? '' : 's'} available to RUN --mount=type=secret)`);
+    const code = await new Promise<number>((resolve, reject) => {
+      const child = spawn('docker', buildxArgs({ ...o, secrets }), { signal: ctx.signal, env: { ...process.env, DOCKER_BUILDKIT: '1' } });
+      pipeLines(child.stdout, ctx.log);
+      pipeLines(child.stderr, ctx.log);
+      child.on('error', reject);
+      child.on('close', (c) => resolve(c ?? 1));
+    });
+    if (code !== 0) throw new Error(`docker buildx build exited with code ${code}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function* walk(dir: string, rel = ''): AsyncGenerator<string> {
@@ -196,16 +262,24 @@ export function dockerDriver(): Driver {
         dockerfile = path.relative(contextDir, path.resolve(ctx.appDir, dockerfile)).split(path.sep).join('/');
       }
       ctx.log(`==> Building image ${tag}`);
-      const stream = await docker.buildImage(await contextTar(contextDir, extra) as unknown as NodeJS.ReadableStream, {
-        t: tag,
-        dockerfile,
-        buildargs: detected.runtime !== 'docker' ? ctx.env : Object.fromEntries(Object.entries(ctx.env).filter(([k]) => k.startsWith('NAV_'))),
-        nocache: ctx.clearCache,
-        forcerm: true,
-        labels: { 'nav.service': ctx.serviceId, 'nav.deploy': ctx.deployId },
-        abortSignal: ctx.signal,
-      } as Docker.ImageBuildOptions);
-      await followProgress(docker, stream, ctx.log);
+      const buildargs = detected.runtime !== 'docker' ? ctx.env : Object.fromEntries(Object.entries(ctx.env).filter(([k]) => k.startsWith('NAV_')));
+      const labels = { 'nav.service': ctx.serviceId, 'nav.deploy': ctx.deployId };
+      // The Engine API cannot attach BuildKit secrets (they need a client session), so Dockerfiles that mount
+      // secrets are built through the docker CLI instead.
+      if (detected.runtime === 'docker' && usesBuildSecrets(await readFile(path.resolve(contextDir, dockerfile), 'utf8'))) {
+        await buildWithSecrets(ctx, { tag, dockerfile: path.resolve(contextDir, dockerfile), contextDir, buildArgs: buildargs, labels, noCache: ctx.clearCache });
+      } else {
+        const stream = await docker.buildImage(await contextTar(contextDir, extra) as unknown as NodeJS.ReadableStream, {
+          t: tag,
+          dockerfile,
+          buildargs,
+          nocache: ctx.clearCache,
+          forcerm: true,
+          labels,
+          abortSignal: ctx.signal,
+        } as Docker.ImageBuildOptions);
+        await followProgress(docker, stream, ctx.log);
+      }
       ctx.log('==> Image built 🎉');
       if (svc.type === 'static') return extractStatic(docker, tag, ctx, svc.publish_path);
       return { kind: 'image', ref: tag, startCommand: detected.runtime === 'docker' ? svc.start_command : null };

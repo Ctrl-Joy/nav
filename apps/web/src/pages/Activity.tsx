@@ -28,6 +28,10 @@ function eventText(e: NavEvent): string {
       return `Deploy failed${sha}${typeof d.error === 'string' ? ` — ${d.error}` : ''}`;
     case 'deploy_canceled':
       return `Deploy canceled${sha}`;
+    case 'deploy_waiting_for_checks':
+      return `Waiting for CI checks${sha}`;
+    case 'deploy_skipped_checks_failed':
+      return `Not deployed: CI checks failed${sha}`;
     default:
       return describeEvent(e);
   }

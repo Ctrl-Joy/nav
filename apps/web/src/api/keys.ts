@@ -62,4 +62,5 @@ export const qk = {
 
   envGroup: (id: string) => ['env-group', id] as const,
   blueprint: (id: string) => ['blueprint', id] as const,
+  blueprintPreviews: (id: string) => ['blueprint', id, 'previews'] as const,
 };

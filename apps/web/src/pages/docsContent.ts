@@ -352,6 +352,15 @@ nav env unset api OLD_FLAG`,
         type: 'p',
         text: "A commit whose message contains `[skip ci]` does not trigger a deploy. Build filters are glob patterns on paths, so a push only deploys when it changes files that match.",
       },
+      { type: 'h3', text: 'Deploy after CI checks pass', id: 'auto-deploy-checks' },
+      {
+        type: 'p',
+        text: "Set a service's auto-deploy to After CI checks pass (`autoDeploy: \"checks\"` on the API, `autoDeployTrigger: checksPass` in `nav.yaml`). A push is then recorded as pending instead of deployed. When GitHub reports the commit's check suites, check runs and commit statuses as finished, NAV deploys it only if every one concluded success, neutral or skipped. If any failed, the commit is not deployed and a `deploy_skipped_checks_failed` event is recorded. A newer push replaces the pending commit.",
+      },
+      {
+        type: 'p',
+        text: "This needs the GitHub App with read access to checks and commit statuses, subscribed to the `check_suite`, `check_run` and `status` events. Without the App NAV can only judge each event on its own, so use it with a single required check.",
+      },
     ],
   },
   {
@@ -365,6 +374,10 @@ nav env unset api OLD_FLAG`,
       },
       {
         type: 'p',
+        text: "NAV keeps one comment per preview on the pull request and edits it as deploys start, go live or fail, so the comment always shows the current status and URL. Comments need the GitHub App; without it previews still work, silently.",
+      },
+      {
+        type: 'p',
         text: "Previews are hidden from the normal service list. Use `?includePreviews=1` on the API, or the service's Previews tab, to see them. You can also create a preview by hand with a branch and an optional PR number.",
       },
       {
@@ -372,9 +385,24 @@ nav env unset api OLD_FLAG`,
         code: `POST /api/v1/services/<serviceId>/previews
 { "branch": "feature/login", "prNumber": 42 }`,
       },
+      { type: 'h3', text: 'Blueprint preview environments', id: 'blueprint-previews' },
       {
         type: 'p',
-        text: "Preview environments are per service. Whole-stack blueprint previews are not built yet.",
+        text: "A blueprint can preview its whole stack. With `previews.generation` set, each pull request against the blueprint's branch gets a copy of every service, database and env var group in the blueprint, named with a `-pr-<number>` suffix. `fromDatabase`, `fromService` and `fromGroup` resolve to the copies, so the preview never touches your real data. Databases start empty on the free plan, services build the pull request's head, and the whole environment is deleted when the pull request closes or after `expireAfterDays` without activity (0 never expires).",
+      },
+      {
+        type: 'code',
+        code: `previews:
+  generation: automatic   # off | manual (add the nav-preview label to a PR) | automatic
+  expireAfterDays: 3
+services:
+  - type: web
+    name: api
+    ...`,
+      },
+      {
+        type: 'p',
+        text: "The blueprint page lists its preview environments with links to every copy, and each can be deleted from there. The same is available on the API: `GET /api/v1/blueprints/<id>/previews` and `DELETE /api/v1/blueprint-previews/<previewId>`. The pull request gets one comment listing each service of the environment with its status and URL.",
       },
     ],
   },
@@ -443,6 +471,37 @@ envVarGroups:
         code: `nav blueprint validate nav.yaml
 nav blueprint launch --repo https://github.com/acme/app --branch main
 nav blueprint sync <id|name>`,
+      },
+    ],
+  },
+  {
+    slug: 'deploy-button',
+    group: 'Platform',
+    title: 'Deploy to NAV button',
+    blocks: [
+      {
+        type: 'p',
+        text: "Put a Deploy to NAV button in a README so anyone can launch your repository's `nav.yaml` in their own workspace. The button links to `/deploy?repo=<git url>` on your NAV dashboard. Signed-in users see what the blueprint will create (services, databases, env groups) and pick a workspace; signed-out users sign up or sign in first and come back to the same screen. Launching creates a blueprint, which then syncs like any other.",
+      },
+      {
+        type: 'p',
+        text: "Replace `https://nav.example.com` with your dashboard's URL (`http://localhost:5180` locally). Optional query parameters: `branch` (defaults to the repository's default branch).",
+      },
+      { type: 'h3', text: 'Markdown', id: 'deploy-button-markdown' },
+      {
+        type: 'code',
+        code: `[![Deploy to NAV](https://nav.example.com/deploy-button.svg)](https://nav.example.com/deploy?repo=https://github.com/acme/app)`,
+      },
+      { type: 'h3', text: 'HTML', id: 'deploy-button-html' },
+      {
+        type: 'code',
+        code: `<a href="https://nav.example.com/deploy?repo=https://github.com/acme/app">
+  <img src="https://nav.example.com/deploy-button.svg" alt="Deploy to NAV" height="32">
+</a>`,
+      },
+      {
+        type: 'p',
+        text: "The repository must be reachable by the NAV control plane and contain a valid `nav.yaml` at its root. The dashboard's Templates page uses the same flow for a few ready-made starter repositories.",
       },
     ],
   },
@@ -564,6 +623,29 @@ nav logs api --stream build --search "npm ERR"`,
       {
         type: 'p',
         text: "A `Dockerfile` at the root (or at the path set in the service's Dockerfile path, with its own build context) is used as it is. Build arguments named `NAV_*` are passed in. Images from a private registry need a registry credential, added in workspace settings and selected on the service.",
+      },
+      { type: 'h3', text: 'Build secrets', id: 'build-secrets' },
+      {
+        type: 'p',
+        text: "Every environment variable of the service (its own and those from linked env groups) and every secret file is available to the build as a BuildKit secret. The secret id is the variable's name, or the secret file's filename. Mount one in a `RUN` step and it exists only while that step runs: it is never written to an image layer, the image history or a build argument.",
+      },
+      {
+        type: 'code',
+        code: `# syntax=docker/dockerfile:1
+FROM node:22-bookworm-slim
+WORKDIR /app
+COPY package*.json ./
+# An env var named NPM_TOKEN, exposed as an environment variable for this step only
+RUN --mount=type=secret,id=NPM_TOKEN,env=NPM_TOKEN npm ci
+# A secret file named .npmrc, mounted at a path you choose
+RUN --mount=type=secret,id=.npmrc,target=/root/.npmrc npm ci
+# Or read it from the default location, /run/secrets/<id>
+RUN --mount=type=secret,id=SENTRY_AUTH_TOKEN SENTRY_AUTH_TOKEN="$(cat /run/secrets/SENTRY_AUTH_TOKEN)" npm run build
+COPY . .`,
+      },
+      {
+        type: 'p',
+        text: "A Dockerfile that mounts a secret is built with `docker buildx build` on the node, so the Docker CLI with the buildx plugin must be installed next to the agent. Values are written to temporary files readable only by the agent and removed when the build ends. Secrets are not available to builds that use a generated Dockerfile (native runtimes), which receive the environment as build arguments instead.",
       },
       { type: 'h3', text: 'Container limits' },
       {
@@ -898,7 +980,6 @@ NAV_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory`,
           "Persistent disk snapshots.",
           "SSH shell access to instances.",
           "Log streaming to syslog.",
-          "Blueprint preview environments that spin up a whole stack. Per-service PR previews are built.",
         ],
       },
     ],

@@ -22,6 +22,8 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', ...page(() => import('./pages/Landing'), 'LandingPage') },
       { path: '/docs', ...page(() => import('./pages/Docs'), 'DocsPage') },
+      // "Deploy to NAV" button target: public, it sends signed-out visitors to sign-up and back.
+      { path: '/deploy', ...page(() => import('./pages/DeployToNav'), 'DeployToNavPage') },
       { path: '/login', ...page(() => import('./pages/auth/AuthPages'), 'LoginPage') },
       { path: '/login/mfa', ...page(() => import('./pages/auth/AuthPages'), 'LoginMfaPage') },
       { path: '/signup', ...page(() => import('./pages/auth/AuthPages'), 'SignupPage') },
@@ -91,6 +93,7 @@ export const router = createBrowserRouter([
               { path: 'blueprints', ...page(() => import('./pages/blueprints/Blueprints'), 'BlueprintsPage') },
               { path: 'blueprints/new', ...page(() => import('./pages/blueprints/NewBlueprint'), 'NewBlueprintPage') },
               { path: 'blueprints/:blueprintId', ...page(() => import('./pages/blueprints/BlueprintDetail'), 'BlueprintDetailPage') },
+              { path: 'templates', ...page(() => import('./pages/Templates'), 'TemplatesPage') },
               { path: 'projects', ...page(() => import('./pages/Projects'), 'ProjectsPage') },
               { path: 'activity', ...page(() => import('./pages/Activity'), 'ActivityPage') },
               { path: 'settings', ...page(() => import('./pages/settings/WorkspaceSettings'), 'WorkspaceSettingsPage') },

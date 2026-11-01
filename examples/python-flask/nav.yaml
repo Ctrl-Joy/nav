@@ -1,0 +1,8 @@
+# "Deploy to NAV" blueprint for this repository: a Flask app served by gunicorn.
+services:
+  - type: web
+    name: flask-app
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /healthz

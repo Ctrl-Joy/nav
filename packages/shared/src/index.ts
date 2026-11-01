@@ -109,6 +109,10 @@ export interface Disk { name: string; mountPath: string; sizeGB: number }
 export interface StaticHeader { path: string; name: string; value: string }
 export interface StaticRoute { type: 'redirect' | 'rewrite'; source: string; destination: string }
 export interface Previews { mode: 'off' | 'manual' | 'automatic'; expireAfterDays: number }
+/** 'checks' deploys a pushed commit only after all of its GitHub checks / statuses pass. */
+export type AutoDeploy = 'commit' | 'checks' | 'off';
+/** Blueprint-level preview environments (a copy of the whole stack per pull request). */
+export interface BlueprintPreviews { generation: 'off' | 'manual' | 'automatic'; expireAfterDays: number }
 
 export interface Service {
   id: string;
@@ -133,7 +137,7 @@ export interface Service {
   plan: string;
   instanceCount: number;
   autoscaling: Autoscaling;
-  autoDeploy: 'commit' | 'off';
+  autoDeploy: AutoDeploy;
   buildFilter: { paths: string[]; ignoredPaths: string[] };
   cronSchedule: string | null;
   disk: Disk | null;
@@ -308,7 +312,38 @@ export interface Blueprint {
   lastError: string | null;
   lastSyncedAt: string | null;
   resources: { type: 'service' | 'database' | 'env_group'; id: string; name: string }[];
+  previews: BlueprintPreviews;
   createdAt: string;
+}
+
+/** A pull request's copy of a blueprint's whole stack. */
+export interface PreviewEnvironment {
+  id: string;
+  blueprintId: string;
+  prNumber: number;
+  prTitle: string | null;
+  branch: string;
+  commitSha: string | null;
+  status: 'creating' | 'ready' | 'failed' | 'deleting';
+  error: string | null;
+  resources: { type: 'service' | 'database' | 'env_group'; id: string; name: string; status: string | null; url: string | null }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What "Deploy to NAV" found in a repository's blueprint file. */
+export interface BlueprintInspection {
+  valid: boolean;
+  errors: string[];
+  repoUrl: string;
+  branch: string;
+  filePath: string;
+  name: string;
+  yaml: string;
+  services: { name: string; type: string; runtime: string; plan: string | null }[];
+  databases: { name: string; plan: string | null }[];
+  envGroups: { name: string }[];
+  previews: BlueprintPreviews | null;
 }
 
 export interface Event {
@@ -351,7 +386,7 @@ export interface CreateServiceInput {
   port?: number | null;
   plan?: string;
   instanceCount?: number;
-  autoDeploy?: 'commit' | 'off';
+  autoDeploy?: AutoDeploy;
   cronSchedule?: string | null;
   envVars?: EnvVar[];
   secretFiles?: SecretFile[];

@@ -9,6 +9,7 @@ import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
 import { sleepIdleServices } from '../lib/sleep.ts';
 import { ensurePlatformCertificate } from '../lib/platformTls.ts';
+import { expirePreviewEnvironments } from '../lib/previews.ts';
 import { deleteStoredArtifact } from '@nav/shared/artifacts';
 import { snapshotJob } from '../http/routes/snapshots.ts';
 
@@ -135,15 +136,20 @@ async function housekeepingTick(): Promise<void> {
   await q("DELETE FROM sessions WHERE expires_at < now()");
   await q("DELETE FROM jobs WHERE status IN ('done','failed','canceled') AND finished_at < now() - interval '3 days'");
   await q("DELETE FROM acme_challenges WHERE created_at < now() - interval '1 day'");
+  // Commits whose checks never reported back are dropped after a week.
+  await q("DELETE FROM pending_check_deploys WHERE created_at < now() - interval '7 days'");
   await q("DELETE FROM instances WHERE status IN ('stopped','lost') AND stopped_at < now() - interval '1 day'");
   await q("DELETE FROM nodes WHERE last_heartbeat < now() - interval '7 days' AND NOT EXISTS (SELECT 1 FROM databases d WHERE d.node_id = nodes.id)");
   // Expire idle previews.
   const expired = await q(
     `SELECT c.* FROM services c JOIN services p ON p.id = c.parent_service_id
      WHERE c.status <> 'deleting' AND c.updated_at < now() - make_interval(days => COALESCE((p.previews->>'expireAfterDays')::int, 7))
-       AND NOT EXISTS (SELECT 1 FROM deploys d WHERE d.service_id = c.id AND d.created_at > now() - make_interval(days => COALESCE((p.previews->>'expireAfterDays')::int, 7)))`,
+       AND NOT EXISTS (SELECT 1 FROM deploys d WHERE d.service_id = c.id AND d.created_at > now() - make_interval(days => COALESCE((p.previews->>'expireAfterDays')::int, 7)))
+       -- Copies inside a blueprint preview environment expire with their environment.
+       AND NOT EXISTS (SELECT 1 FROM preview_environments pe WHERE pe.resources @> jsonb_build_array(jsonb_build_object('id', c.id)))`,
   );
   for (const p of expired) await markForDeletion(p, null);
+  await expirePreviewEnvironments();
 }
 
 /** Daily automatic database backups (keep 7) and certificate renewals (30 days before expiry). */

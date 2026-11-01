@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eraser, Plus, RotateCw, Trash2 } from 'lucide-react';
-import type { Runtime, Service, StaticHeader, StaticRoute, UpdateServiceInput } from '@nav/shared';
+import type { AutoDeploy, Runtime, Service, StaticHeader, StaticRoute, UpdateServiceInput } from '@nav/shared';
 import { useLogStreams, useRegistryCredentials } from '@/api/integrations';
 import {
   useDeleteService,
@@ -54,10 +54,16 @@ interface BuildForm {
   publishPath: string;
   healthCheckPath: string;
   cronSchedule: string;
-  autoDeploy: boolean;
+  autoDeploy: AutoDeploy;
   paths: string;
   ignoredPaths: string;
 }
+
+const AUTO_DEPLOY_OPTIONS: { value: AutoDeploy; label: string }[] = [
+  { value: 'commit', label: 'On commit' },
+  { value: 'checks', label: 'After CI checks pass' },
+  { value: 'off', label: 'Off' },
+];
 
 function toForm(s: Service): BuildForm {
   return {
@@ -72,7 +78,7 @@ function toForm(s: Service): BuildForm {
     publishPath: s.publishPath ?? '',
     healthCheckPath: s.healthCheckPath ?? '',
     cronSchedule: s.cronSchedule ?? '',
-    autoDeploy: s.autoDeploy === 'commit',
+    autoDeploy: s.autoDeploy,
     paths: s.buildFilter.paths.join('\n'),
     ignoredPaths: s.buildFilter.ignoredPaths.join('\n'),
   };
@@ -99,7 +105,7 @@ function diff(s: Service, f: BuildForm): UpdateServiceInput {
   if (f.publishPath !== a.publishPath) out.publishPath = nullable(f.publishPath);
   if (f.healthCheckPath !== a.healthCheckPath) out.healthCheckPath = nullable(f.healthCheckPath);
   if (f.cronSchedule !== a.cronSchedule) out.cronSchedule = nullable(f.cronSchedule);
-  if (f.autoDeploy !== a.autoDeploy) out.autoDeploy = f.autoDeploy ? 'commit' : 'off';
+  if (f.autoDeploy !== a.autoDeploy) out.autoDeploy = f.autoDeploy;
   if (f.paths !== a.paths || f.ignoredPaths !== a.ignoredPaths) out.buildFilter = { paths: lines(f.paths), ignoredPaths: lines(f.ignoredPaths) };
   return out;
 }
@@ -244,8 +250,20 @@ function BuildCard({ service }: { service: Service }) {
       )}
       {service.repoUrl && (
         <>
-          <SettingRow title="Auto-deploy" description="Deploy automatically on every push to the branch.">
-            <Switch checked={form.autoDeploy} onChange={(v) => set('autoDeploy', v)} disabled={!canWrite} label={form.autoDeploy ? 'On commit' : 'Off'} />
+          <SettingRow title="Auto-deploy" description="Deploy automatically on every push to the branch, or only once the commit's GitHub checks have passed.">
+            <Select
+              value={form.autoDeploy}
+              onChange={(e) => set('autoDeploy', e.target.value as AutoDeploy)}
+              options={AUTO_DEPLOY_OPTIONS}
+              disabled={!canWrite}
+              aria-label="Auto-deploy"
+              className="max-w-xs"
+            />
+            {form.autoDeploy === 'checks' && (
+              <p className="mt-1 text-xs text-fg-muted">
+                Waits for every check run and commit status on the pushed commit (success, neutral or skipped). If any fails, the commit is not deployed. Requires the GitHub App.
+              </p>
+            )}
           </SettingRow>
           <SettingRow title="Build filters" description="Only deploy when changed files match (one glob per line). Ignored paths never trigger a deploy.">
             <div className="grid gap-2 sm:grid-cols-2">

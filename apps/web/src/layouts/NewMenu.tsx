@@ -1,4 +1,4 @@
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, LayoutTemplate, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Dropdown, DropdownItem, DropdownLabel, DropdownSeparator } from '@/components/ui';
 import { RESOURCE_META, type ResourceKind } from '@/components/ResourceIcon';
@@ -71,6 +71,10 @@ export function NewMenu({
       {item('postgres')}
       {item('keyvalue')}
       {item('blueprint')}
+      <DropdownSeparator />
+      <DropdownItem icon={<LayoutTemplate className="size-4" strokeWidth={1.75} />} onSelect={() => navigate(`/w/${ws}/templates`)}>
+        From a template
+      </DropdownItem>
     </Dropdown>
   );
 }

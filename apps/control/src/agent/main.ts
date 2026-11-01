@@ -10,7 +10,7 @@ import { enqueue } from '../lib/core.ts';
 import { migrate } from '../db/migrate.ts';
 import { notify } from '../db/pool.ts';
 import { handleDbBackup, handleDbDelete, handleDbProvision, handleDbReconfigure, handleDbRestart, handleDbRestore, handleDbResume, handleDbSuspend, monitorDatabases, recoverDatabases } from './databases.ts';
-import { handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
+import { handleBlueprintPreview, handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
 import { CONTROL_JOBS } from '../scheduler/jobs.ts';
 import { liveNodes } from './cluster.ts';
 import { startShellServer } from './shell.ts';
@@ -62,6 +62,7 @@ const HANDLERS: Record<string, Handler> = {
   delete_service: handleDeleteService,
   run: handleRun,
   blueprint_sync: handleBlueprintSync,
+  blueprint_preview: handleBlueprintPreview,
   instance_start: handleInstanceStart,
   instance_stop: handleInstanceStop,
   node_cleanup: handleNodeCleanup,

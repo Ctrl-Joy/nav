@@ -1,14 +1,17 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
-import type { Blueprint } from '@nav/shared';
+import { AlertTriangle, ArrowLeft, ExternalLink, GitPullRequest, RefreshCw, Trash2 } from 'lucide-react';
+import type { Blueprint, BlueprintPreviews, PreviewEnvironment } from '@nav/shared';
 import { isApiError } from '@/api/client';
-import { useBlueprint, useDeleteBlueprint, useSyncBlueprint, useUpdateBlueprint } from '@/api/resources';
+import { useBlueprint, useBlueprintPreviews, useDeleteBlueprint, useDeleteBlueprintPreview, useSyncBlueprint, useUpdateBlueprint } from '@/api/resources';
 import { ResourceIcon, type ResourceKind } from '@/components/ResourceIcon';
 import { RelativeTime } from '@/components/RelativeTime';
-import { Button, Card, CardHeader, Checkbox, Dialog, Empty, ErrorState, PageHeader, Skeleton, StatusPill, Switch, Table, TBody, Td, Th, THead, Tr, useToast } from '@/components/ui';
+import {
+  Button, Card, CardBody, CardFooter, CardHeader, Checkbox, Dialog, Empty, ErrorState, Field, Input, PageHeader, Segmented, Skeleton, SkeletonRows,
+  StatusPill, Switch, Table, TBody, Td, Th, THead, Tr, useToast,
+} from '@/components/ui';
 import { useWorkspace } from '@/layouts/WorkspaceContext';
-import { repoSlug } from '@/lib/format';
+import { hostnameOf, repoSlug } from '@/lib/format';
 import { useTitle } from '@/lib/useTitle';
 
 type Resource = Blueprint['resources'][number];
@@ -31,6 +34,165 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-[13px] text-fg-muted">{label}</dt>
       <dd className="min-w-0 text-[13px] text-fg">{children}</dd>
     </div>
+  );
+}
+
+const PREVIEW_STATUS: Record<PreviewEnvironment['status'], string> = { creating: 'deploying', ready: 'live', failed: 'failed', deleting: 'deleting' };
+
+/** Blueprint preview environments: settings (also settable in nav.yaml) and the live list per pull request. */
+function BlueprintPreviewsCard({ blueprint: b }: { blueprint: Blueprint }) {
+  const { ws, canWrite } = useWorkspace();
+  const toast = useToast();
+  const update = useUpdateBlueprint(ws, b.id);
+  const previews = useBlueprintPreviews(b.id);
+  const del = useDeleteBlueprintPreview(b.id);
+  const [cfg, setCfg] = useState<BlueprintPreviews>(b.previews);
+  useEffect(() => setCfg(b.previews), [b.previews]);
+  const dirty = JSON.stringify(cfg) !== JSON.stringify(b.previews);
+  const [confirm, setConfirm] = useState<PreviewEnvironment | null>(null);
+
+  const save = async () => {
+    try {
+      await update.mutateAsync({ previews: cfg });
+      toast.success('Preview settings saved');
+    } catch (e) {
+      toast.fromError(e, 'Could not update blueprint');
+    }
+  };
+
+  const onDelete = async () => {
+    if (!confirm) return;
+    try {
+      await del.mutateAsync(confirm.id);
+      toast.success(`Preview for PR #${confirm.prNumber} deleted`, 'Its services, databases and env groups are being deleted.');
+      setConfirm(null);
+    } catch (e) {
+      toast.fromError(e, 'Could not delete preview environment');
+    }
+  };
+
+  const repoHref = /^https?:\/\//.test(b.repoUrl) ? b.repoUrl.replace(/\.git$/, '') : null;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Preview environments"
+        description={`A copy of every resource in this blueprint for each pull request against ${b.branch}, deleted when the PR closes. Set "previews:" in ${b.filePath} to manage this from the file.`}
+      />
+      <CardBody className="space-y-4">
+        <Segmented
+          label="Generation"
+          value={cfg.generation}
+          onChange={(generation) => setCfg({ ...cfg, generation })}
+          options={[
+            { value: 'off', label: 'Off' },
+            { value: 'manual', label: 'Manual' },
+            { value: 'automatic', label: 'Automatic' },
+          ]}
+        />
+        <p className="text-xs text-fg-subtle">
+          {cfg.generation === 'automatic'
+            ? 'Every pull request gets a preview environment.'
+            : cfg.generation === 'manual'
+              ? 'Add the nav-preview label to a pull request to create its preview environment.'
+              : 'No preview environments are created.'}
+        </p>
+        <Field label="Expire after (days)" hint="Preview environments without pull request activity are deleted after this many days. 0 keeps them until the PR closes." className="max-w-xs">
+          {(id) => (
+            <Input id={id} type="number" min={0} max={365} value={cfg.expireAfterDays} disabled={!canWrite || cfg.generation === 'off'}
+              onChange={(e) => setCfg({ ...cfg, expireAfterDays: Math.max(0, Number(e.target.value) || 0) })} />
+          )}
+        </Field>
+      </CardBody>
+      {canWrite && (
+        <CardFooter>
+          <Button variant="primary" size="sm" disabled={!dirty} loading={update.isPending} onClick={save}>
+            Save
+          </Button>
+        </CardFooter>
+      )}
+      <div className="border-t border-border p-4">
+        {previews.isPending ? (
+          <SkeletonRows rows={2} />
+        ) : previews.isError ? (
+          <ErrorState error={previews.error} onRetry={() => previews.refetch()} />
+        ) : !previews.data.items.length ? (
+          <Empty compact icon={<GitPullRequest className="size-5" />} title="No preview environments" description="Open a pull request against the blueprint branch." />
+        ) : (
+          <Table>
+            <THead>
+              <tr>
+                <Th>Pull request</Th>
+                <Th>Status</Th>
+                <Th>Resources</Th>
+                <Th>Updated</Th>
+                <Th />
+              </tr>
+            </THead>
+            <TBody>
+              {previews.data.items.map((p) => (
+                <Tr key={p.id}>
+                  <Td>
+                    <div className="font-medium text-fg">
+                      {repoHref ? (
+                        <a href={`${repoHref}/pull/${p.prNumber}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
+                          #{p.prNumber} <ExternalLink className="size-3" />
+                        </a>
+                      ) : (
+                        `#${p.prNumber}`
+                      )}{' '}
+                      <span className="font-normal text-fg-muted">{p.prTitle}</span>
+                    </div>
+                    <div className="font-mono text-xs text-fg-subtle">{p.branch}{p.commitSha ? ` @ ${p.commitSha.slice(0, 7)}` : ''}</div>
+                    {p.error && <div className="mt-1 text-xs break-words text-danger">{p.error}</div>}
+                  </Td>
+                  <Td><StatusPill status={PREVIEW_STATUS[p.status]} /></Td>
+                  <Td>
+                    <ul className="space-y-1">
+                      {p.resources.map((r) => (
+                        <li key={`${r.type}-${r.id}`} className="flex flex-wrap items-center gap-2 text-[13px]">
+                          <Link to={resourcePath(ws, r)} className="flex items-center gap-1.5 text-fg hover:underline">
+                            <ResourceIcon kind={resourceKind(r)} />
+                            {r.name}
+                          </Link>
+                          {r.url && (
+                            <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono text-xs text-accent hover:underline">
+                              {hostnameOf(r.url)} <ExternalLink className="size-3" />
+                            </a>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </Td>
+                  <Td className="text-fg-muted"><RelativeTime value={p.updatedAt} /></Td>
+                  <Td className="text-right">
+                    {canWrite && (
+                      <Button size="sm" variant="outline-danger" icon={<Trash2 className="size-3.5" />} onClick={() => setConfirm(p)}>
+                        Delete
+                      </Button>
+                    )}
+                  </Td>
+                </Tr>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </div>
+      <Dialog
+        open={!!confirm}
+        onClose={() => setConfirm(null)}
+        title={`Delete the preview for PR #${confirm?.prNumber ?? ''}?`}
+        description="Its services, databases (with their data) and env groups are deleted. Pushing to the PR again recreates it."
+        footer={
+          <>
+            <Button onClick={() => setConfirm(null)}>Cancel</Button>
+            <Button variant="danger" loading={del.isPending} onClick={onDelete}>
+              Delete preview
+            </Button>
+          </>
+        }
+      />
+    </Card>
   );
 }
 
@@ -184,6 +346,8 @@ export function BlueprintDetailPage() {
           )}
         </div>
       </Card>
+
+      <BlueprintPreviewsCard blueprint={b} />
 
       {isAdmin && (
         <Card className="border-danger/40">

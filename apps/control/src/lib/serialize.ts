@@ -202,6 +202,7 @@ export function blueprint(r: Row, resources: Row[]): Blueprint {
     lastError: r.last_error,
     lastSyncedAt: r.last_synced_at,
     resources: resources.map((x) => ({ type: x.resource_type, id: x.resource_id, name: x.name })),
+    previews: r.previews ?? { generation: 'off', expireAfterDays: 7 },
     createdAt: r.created_at,
   };
 }

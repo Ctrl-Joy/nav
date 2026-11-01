@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Blueprint, EnvGroup, EnvVar, Page, SecretFile } from '@nav/shared';
+import type { Blueprint, BlueprintInspection, EnvGroup, EnvVar, Page, PreviewEnvironment, SecretFile } from '@nav/shared';
 import { api } from './client';
 import { qk } from './keys';
 import type { BlueprintValidateResult } from './types';
@@ -90,7 +90,7 @@ export function useSyncBlueprint(ws: string, id: string) {
 export function useUpdateBlueprint(ws: string, id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<Pick<Blueprint, 'name' | 'branch' | 'filePath' | 'autoSync'>>) => api.patch<Blueprint>(`/blueprints/${id}`, body),
+    mutationFn: (body: Partial<Pick<Blueprint, 'name' | 'branch' | 'filePath' | 'autoSync' | 'previews'>>) => api.patch<Blueprint>(`/blueprints/${id}`, body),
     onSuccess: (data) => {
       qc.setQueryData(qk.blueprint(id), data);
       qc.invalidateQueries({ queryKey: qk.blueprints(ws) });
@@ -114,5 +114,34 @@ export function useDeleteBlueprint(ws: string) {
 export function useValidateBlueprint() {
   return useMutation({
     mutationFn: (yaml: string) => api.post<BlueprintValidateResult>('/blueprints/validate', { yaml }),
+  });
+}
+
+/** "Deploy to NAV": what a repository's blueprint file would create. */
+export function useInspectBlueprint(repoUrl: string | null, branch?: string | null) {
+  return useQuery({
+    queryKey: ['blueprint-inspect', repoUrl, branch ?? null] as const,
+    queryFn: () => api.post<BlueprintInspection>('/blueprints/inspect', { repoUrl, branch: branch || undefined }),
+    enabled: !!repoUrl,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+// Blueprint preview environments ---------------------------------------------------------------------
+
+export function useBlueprintPreviews(id: string) {
+  return useQuery({
+    queryKey: qk.blueprintPreviews(id),
+    queryFn: () => api.get<Page<PreviewEnvironment>>(`/blueprints/${id}/previews`),
+    enabled: !!id,
+  });
+}
+
+export function useDeleteBlueprintPreview(blueprintId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (previewId: string) => api.del(`/blueprint-previews/${previewId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.blueprintPreviews(blueprintId) }),
   });
 }

@@ -1,0 +1,8 @@
+# "Deploy to NAV" blueprint for this repository: a Go HTTP API.
+services:
+  - type: web
+    name: go-api
+    runtime: go
+    buildCommand: go build -o app .
+    startCommand: ./app
+    healthCheckPath: /healthz

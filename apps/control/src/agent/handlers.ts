@@ -8,7 +8,7 @@ import { notify, one, q, type Row } from '../db/pool.ts';
 import { changed, recordEvent } from '../lib/core.ts';
 import { authedUrl, git } from '../lib/git.ts';
 import { setCommitStatus } from '../lib/github.ts';
-import { applyBlueprint, fetchBlueprintFile, parseBlueprint } from '../lib/blueprints.ts';
+import { applyBlueprint, applyPreviewEnvironment, fetchBlueprintFile, parseBlueprint } from '../lib/blueprints.ts';
 import { localize, publish, removeLocal, retire } from './artifacts.ts';
 import { activeInstances, describePlacement, place, startInstances, stopInstances, waitInstances } from './cluster.ts';
 import { detect } from './detect.ts';
@@ -135,7 +135,7 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
       const startCommand = svc.start_command ?? detected.startCommand;
       try {
         artifact = await ctx.driver.build(
-          { deployId: deploy.id, serviceId: svc.id, workspaceId: ws, srcDir: buildDir, appDir, service: svc, env: userEnv.env, clearCache: deploy.clear_cache, log, signal: abort.signal },
+          { deployId: deploy.id, serviceId: svc.id, workspaceId: ws, srcDir: buildDir, appDir, service: svc, env: userEnv.env, files: userEnv.files, clearCache: deploy.clear_cache, log, signal: abort.signal },
           { runtime: detected.runtime, buildCommand, startCommand },
         );
       } catch (err) {
@@ -431,3 +431,20 @@ export async function handleBlueprintSync(_ctx: Ctx, payload: { blueprintId: str
 }
 
 export { sleep };
+
+/** Builds (or refreshes at the PR head) a blueprint preview environment from the PR branch's blueprint file. */
+export async function handleBlueprintPreview(_ctx: Ctx, payload: { previewId: string }): Promise<void> {
+  const env = await one('SELECT * FROM preview_environments WHERE id = $1', [payload.previewId]);
+  if (!env) return;
+  const bp = await one('SELECT * FROM blueprints WHERE id = $1', [env.blueprint_id]);
+  if (!bp) return;
+  try {
+    const { text, commit } = await fetchBlueprintFile({ ...bp, branch: env.branch });
+    const spec = parseBlueprint(text);
+    await applyPreviewEnvironment({ ...env, commit_sha: env.commit_sha ?? commit }, bp, spec, (m) => console.log(`[preview ${bp.name}#${env.pr_number}] ${m}`));
+    await q("UPDATE preview_environments SET status = 'ready', error = NULL, commit_sha = COALESCE(commit_sha, $2), updated_at = now() WHERE id = $1", [env.id, commit]);
+  } catch (err) {
+    await q("UPDATE preview_environments SET status = 'failed', error = $2, updated_at = now() WHERE id = $1", [env.id, (err as Error).message.slice(0, 2000)]);
+  }
+  await changed(bp.workspace_id, 'blueprint', bp.id);
+}

@@ -40,7 +40,7 @@ const CreateService = z.object({
   port: z.number().int().nullable().optional(),
   plan: z.string().optional(),
   instanceCount: z.number().int().min(1).max(100).optional(),
-  autoDeploy: z.enum(['commit', 'off']).optional(),
+  autoDeploy: z.enum(['commit', 'checks', 'off']).optional(),
   cronSchedule: z.string().max(100).nullable().optional(),
   envVars: z.array(EnvVar).max(500).optional(),
   secretFiles: z.array(SecretFile).max(50).optional(),

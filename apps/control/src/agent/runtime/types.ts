@@ -18,6 +18,8 @@ export interface BuildContext {
   appDir: string;            // srcDir + rootDir
   service: Record<string, any>;
   env: Record<string, string>;
+  /** Secret files (and, with `env`, BuildKit secrets for Docker builds that mount them). */
+  files: SecretFile[];
   clearCache: boolean;
   log: (line: string) => void;
   signal: AbortSignal;
