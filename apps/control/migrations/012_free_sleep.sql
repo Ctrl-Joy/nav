@@ -1,7 +1,8 @@
 -- Free instance sleep: free-plan web services spin down after a quiet period and the edge wakes them on demand.
 
 ALTER TABLE services ADD COLUMN sleeping boolean NOT NULL DEFAULT false;
-ALTER TABLE services ADD COLUMN last_request_at timestamptz;   -- batch-written by the edge (metrics flush)
+-- Added (unused) by 002; reused here for the time of the last request.
+ALTER TABLE services ADD COLUMN IF NOT EXISTS last_request_at timestamptz;   -- batch-written by the edge (metrics flush)
 
 CREATE OR REPLACE VIEW edge_routes AS
   SELECT s.id AS service_id, s.slug, s.type, s.suspended, s.maintenance_mode, s.status,
