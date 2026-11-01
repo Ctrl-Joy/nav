@@ -22,6 +22,15 @@ const certs = new CertStore({ cert: dev.cert, key: dev.key }, decrypt, log, { ap
 const { certFile, keyFile } = config.platformTls;
 const metrics = new Metrics(pool, log);
 
+/** NAV_DASHBOARD_HOST: the edge serves the control plane (dashboard + API) there, reaching it at NAV_CONTROL_URL. */
+function controlPlaneRoute() {
+  if (!config.dashboardHost) return null;
+  const u = new URL(config.controlUrl);
+  const target = { host: u.hostname.replace(/^\[|\]$/g, ''), port: Number(u.port || (u.protocol === 'https:' ? 443 : 80)) };
+  const apex = config.dashboardHost.endsWith(`.${config.appsDomain}`) ? config.appsDomain : undefined;
+  return { host: config.dashboardHost, target, apexRedirect: apex };
+}
+
 const edge = new Edge({
   table,
   production,
@@ -29,6 +38,7 @@ const edge = new Edge({
   accessLog: process.env.NAV_EDGE_ACCESS_LOG === '1',
   forceHttps: process.env.NAV_EDGE_FORCE_HTTPS === '1',
   httpsPort: config.edgeHttpsPort,
+  controlPlane: controlPlaneRoute(),
   hasCert: (host) => certs.hasCert(host),
   acmeLookup: async (token) => {
     const { rows } = await pool.query<{ key_auth: string }>('SELECT key_auth FROM acme_challenges WHERE token = $1', [token]);
@@ -75,7 +85,7 @@ async function main(): Promise<void> {
   metrics.start(10_000);
   await listen(httpServer, config.edgeHttpPort);
   await listen(httpsServer, config.edgeHttpsPort);
-  log(`[edge] ${os.hostname()} listening http :${config.edgeHttpPort} https :${config.edgeHttpsPort} (apps domain ${config.appsDomain}, ${table.size} routes, ${certs.size} certs)`);
+  log(`[edge] ${os.hostname()} listening http :${config.edgeHttpPort} https :${config.edgeHttpsPort} (apps domain ${config.appsDomain}, ${table.size} routes, ${certs.size} certs${config.dashboardHost ? `, dashboard ${config.dashboardHost} → ${config.controlUrl}` : ''})`);
   if (!certs.platformSource()) log(`[edge] local dev CA${dev.generated ? ' (generated)' : ''}: ${dev.caPath} — trust it to avoid TLS warnings for *.${config.appsDomain}`);
 }
 

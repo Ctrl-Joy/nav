@@ -1008,7 +1008,41 @@ NAV_SSO_DOMAINS=example.com,example.org`,
         type: 'p',
         text: "The only public entry point. It terminates TLS (with SNI per custom domain), routes each hostname to healthy instances with load balancing and retries, serves static sites, enforces inbound IP rules and maintenance mode, caches what apps mark cacheable, and records request metrics.",
       },
-      { type: 'h3', text: 'Install' },
+      { type: 'h3', text: 'Install on a server', id: 'install-server' },
+      {
+        type: 'p',
+        text: "`scripts/install.sh` sets up a complete single-server NAV on Ubuntu 22.04 or 24.04 (x86_64 or arm64): Node 24, git, Docker Engine and PostgreSQL 17 for the platform database, a `nav` system user, the code in `/opt/nav` with the dashboard built, and three systemd services (`nav-control`, `nav-agent`, `nav-edge`). It opens ports 80 and 443 in ufw and in the iptables rules that Oracle Cloud images ship with, then waits until everything answers. Running it again is safe.",
+      },
+      {
+        type: 'code',
+        code: `curl -fsSL https://raw.githubusercontent.com/Ctrl-Joy/nav/landing-auth-dashboard-redesign/scripts/install.sh \\
+  | sudo bash -s -- --domain onnav.duckdns.org --email you@example.com --duckdns-token <token>`,
+      },
+      {
+        type: 'p',
+        text: "Apps are served at `https://<service>.<domain>`. The dashboard and the API share `https://dashboard.<domain>`: the edge routes that hostname to the control plane, which itself only listens on 127.0.0.1, and never exposes the node-only `/internal` API. The bare domain redirects to the dashboard, and no service can take the `dashboard` name.",
+      },
+      {
+        type: 'p',
+        text: "Secrets (`NAV_MASTER_KEY` and the database password) are generated once into `/etc/nav/nav.env`; back that file up. The installer rewrites `/etc/nav/config.env` from its flags, reusing earlier values for flags you leave out, and never touches `/etc/nav/override.env`, where your own settings (GitHub App, SMTP) go. Use `--upgrade` to pull, install, build, migrate and restart, and `--uninstall` to remove the services (`--purge` also deletes the code, data, configuration and platform database).",
+      },
+      { type: 'h3', text: 'Oracle Cloud Always Free with DuckDNS', id: 'oracle-duckdns' },
+      {
+        type: 'list',
+        items: [
+          "Create a VM: Compute, Instances, Create instance. Pick Canonical Ubuntu 24.04 (or 22.04) and the Ampere `VM.Standard.A1.Flex` shape (arm64; up to 4 OCPUs and 24 GB on the free tier), add your SSH key, and note the public IP.",
+          "Open the ports in Oracle's network: on the instance's subnet, open the security list and add ingress rules for TCP 80 and TCP 443 from `0.0.0.0/0`. The installer handles the firewall inside the VM.",
+          "On duckdns.org, sign in, create a subdomain (for example `onnav`) and set its IP to the VM's public IP. Copy your token. DuckDNS answers for every name below the subdomain, so `dashboard.onnav.duckdns.org` and `<service>.onnav.duckdns.org` need no extra records.",
+          "SSH in and run the installer with `--domain onnav.duckdns.org --email you@example.com --duckdns-token <token>`. Add `--admin-email` if the admin should differ from the Let's Encrypt email.",
+          "Open `https://dashboard.onnav.duckdns.org` (the first certificate comes from Let's Encrypt's staging directory, so the browser warns) and sign up with the admin email.",
+          "When `journalctl -u nav-control | grep tls` shows `issued wildcard certificate`, switch to trusted certificates with `sudo bash /opt/nav/scripts/install.sh --production-certs`. NAV re-issues from the production directory and the edge then redirects HTTP to HTTPS.",
+        ],
+      },
+      {
+        type: 'p',
+        text: "With DuckDNS the certificate covers `*.onnav.duckdns.org` but not `onnav.duckdns.org` itself (see Platform domain & TLS), which is why the dashboard lives on a subdomain.",
+      },
+      { type: 'h3', text: 'Install by hand' },
       {
         type: 'code',
         code: `npm install
@@ -1030,7 +1064,16 @@ NAV_EDGE_HTTPS_PORT=443
 NAV_PUBLIC_PORT_SUFFIX=
 NAV_PUBLIC_SCHEME=https
 NAV_ACME_EMAIL=ops@example.com
-NAV_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory`,
+NAV_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory
+# Serve the dashboard and API through the edge at dashboard.apps.example.com
+NAV_DASHBOARD_HOST=dashboard.apps.example.com
+NAV_DASHBOARD_URL=https://dashboard.apps.example.com
+NAV_API_PUBLIC_URL=https://dashboard.apps.example.com
+NAV_TRUST_PROXY=loopback`,
+      },
+      {
+        type: 'p',
+        text: "`NAV_DASHBOARD_HOST` makes the edge proxy that hostname (HTTP and WebSocket) to the control plane at `NAV_CONTROL_URL`, except `/internal`. `NAV_TRUST_PROXY=loopback` lets the control plane take the client IP and the https scheme (needed for secure cookies) from the edge's forwarding headers, and only from the edge.",
       },
       { type: 'h3', text: 'Platform domain & TLS', id: 'platform-tls' },
       {
@@ -1055,7 +1098,7 @@ NAV_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory`,
       },
       {
         type: 'p',
-        text: "On startup the control plane checks for the certificate and queues an `issue_platform_cert` job when it is missing. The job finds the Cloudflare zone, adds the two `_acme-challenge` TXT values (one for the wildcard, one for the apex), waits until the zone's authoritative nameservers answer with both, completes the order and always deletes the records afterwards. The certificate is stored encrypted next to custom-domain certificates, the edge reloads it within seconds, and the scheduler renews it when fewer than 30 days remain. A failed attempt is retried after 6 hours. Custom domains keep their own certificates, which take precedence for their exact names.",
+        text: "On startup the control plane checks for the certificate and queues an `issue_platform_cert` job when it is missing. With Cloudflare, the job finds the zone, adds the two `_acme-challenge` TXT values (one for the wildcard, one for the apex), waits until the zone's authoritative nameservers answer with both, completes the order and always deletes the records afterwards. The certificate is stored encrypted next to custom-domain certificates, the edge reloads it within seconds, and the scheduler renews it when fewer than 30 days remain. A failed attempt is retried after 6 hours. Custom domains keep their own certificates, which take precedence for their exact names.",
       },
       {
         type: 'p',
@@ -1064,6 +1107,16 @@ NAV_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory`,
       {
         type: 'p',
         text: "Platform admins (the emails in `NAV_ADMIN_EMAILS`, or the first user who signed up) can see the issuer, expiry and last error with `GET /api/v1/platform/tls`. Issuance never runs in development unless `NAV_PLATFORM_TLS=1`; a production edge without the certificate logs a warning and serves its self-signed development certificate.",
+      },
+      {
+        type: 'p',
+        text: "DuckDNS (free, no domain to buy): use your subdomain as the apps domain and set `NAV_DNS_PROVIDER=duckdns` with the account token from duckdns.org. DuckDNS points every name below `<sub>.duckdns.org` at the same IP, so no wildcard record is needed. It also serves a single TXT value for `_acme-challenge.<sub>.duckdns.org`, so NAV validates authorizations one at a time (set the value, wait until the DuckDNS nameservers return it, validate, clear it) and orders `*.<sub>.duckdns.org` only. The bare `<sub>.duckdns.org` is not on the certificate: keep the dashboard and services on subdomains (the installer uses `dashboard.<sub>.duckdns.org`).",
+      },
+      {
+        type: 'code',
+        code: `NAV_APPS_DOMAIN=onnav.duckdns.org
+NAV_DNS_PROVIDER=duckdns
+NAV_DUCKDNS_TOKEN=<token from duckdns.org>`,
       },
       {
         type: 'p',
@@ -1134,7 +1187,6 @@ NAV_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory`,
         items: [
           "Multi-node scheduling. Deploys run on a single node in practice.",
           "Docker-driver Postgres backups and restores.",
-          "Wildcard certificates, which need DNS-01 validation.",
           "Key Value (Redis) services.",
           "Persistent disk snapshots.",
           "SSH shell access to instances.",

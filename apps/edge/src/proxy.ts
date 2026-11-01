@@ -43,7 +43,16 @@ export interface EdgeOptions {
   /** Interval between repeated wake signals while the service is still marked sleeping. */
   wakeSignalMs?: number;
   log?: (msg: string) => void;
+  /**
+   * Serve the control plane (dashboard + API) on a platform hostname, e.g. `dashboard.<appsDomain>`. It takes
+   * precedence over services; `/internal/*` (node-to-control API) is never exposed. `apexRedirect` sends the bare
+   * apps domain there too.
+   */
+  controlPlane?: { host: string; target: { host: string; port: number }; apexRedirect?: string } | null;
 }
+
+/** Paths of the control plane that only nodes may call; the edge answers 404 for them on the dashboard host. */
+const CONTROL_PRIVATE = /^\/internal(\/|$)/i;
 
 interface RequestCtx {
   start: bigint;
@@ -175,7 +184,9 @@ export class Edge {
   readonly cache = new EdgeCache();
   private cacheVersions = new Map<string, string>();
   readonly balancer: Balancer;
-  private opts: Required<Omit<EdgeOptions, 'metrics' | 'acmeLookup' | 'hasCert' | 'table' | 'wake'>> & EdgeOptions;
+  private opts: Required<Omit<EdgeOptions, 'metrics' | 'acmeLookup' | 'hasCert' | 'table' | 'wake' | 'controlPlane'>> & EdgeOptions;
+  /** Synthetic route for the control plane host (no service id: no metrics, cache or sleep). */
+  private controlRoute: Route | null = null;
   private agents = new Map<string, http.Agent>();
   private upgraded = new Set<Duplex>();
   private acmeCache = new Map<string, { value: string; at: number }>();
@@ -191,6 +202,31 @@ export class Edge {
       ...opts,
     };
     this.balancer = new Balancer(this.opts.ejectMs);
+    const cp = opts.controlPlane;
+    if (cp?.host) {
+      this.controlRoute = {
+        serviceId: '', slug: cp.host, type: 'web', suspended: false, maintenanceMode: false, status: 'live',
+        staticHeaders: [], staticRoutes: [], artifact: null, domains: [], ipRules: [],
+        upstreams: [{ id: 'control', host: cp.target.host, port: cp.target.port }],
+        edgeCache: { enabled: false, maxTtlSeconds: 1 }, cacheVersion: '', sleeping: false,
+      };
+    }
+  }
+
+  /** The control plane route when `host` is the dashboard host. */
+  private controlFor(host: string): Route | null {
+    return this.controlRoute && host === this.opts.controlPlane?.host ? this.controlRoute : null;
+  }
+
+  private proxyControl(req: http.IncomingMessage, res: http.ServerResponse, rc: RequestCtx, route: Route, pathOnly: string): void {
+    if (CONTROL_PRIVATE.test(pathOnly)) { this.page(req, res, rc, 'not_found'); return; }
+    if (this.opts.forceHttps && !rc.secure && this.opts.hasCert?.(rc.host)) {
+      const port = this.opts.httpsPort === 443 ? '' : `:${this.opts.httpsPort}`;
+      res.writeHead(301, { location: `https://${rc.host}${port}${req.url ?? '/'}`, 'content-length': 0, 'x-request-id': rc.requestId });
+      res.end();
+      return;
+    }
+    this.proxyToService(req, res, route, rc, 0);
   }
 
   /** Attach request/upgrade/clientError handlers and timeouts to an http(s) server. */
@@ -296,6 +332,16 @@ export class Edge {
     rc.host = host;
 
     if (pathOnly.startsWith(ACME_PREFIX)) { void this.serveAcme(req, res, rc, pathOnly.slice(ACME_PREFIX.length)); return; }
+
+    const control = this.controlFor(host);
+    if (control) { this.proxyControl(req, res, rc, control, pathOnly); return; }
+    const cp = this.opts.controlPlane;
+    if (cp?.apexRedirect && host === cp.apexRedirect) {
+      const portPart = /:(\d+)$/.exec(String(req.headers.host ?? ''))?.[0] ?? '';
+      res.writeHead(302, { location: `${rc.secure ? 'https' : 'http'}://${cp.host}${portPart}${url}`, 'content-length': 0, 'x-request-id': rc.requestId });
+      res.end();
+      return;
+    }
 
     const match = this.table.lookup(host);
     if (!match) { this.page(req, res, rc, 'not_found'); return; }
@@ -430,7 +476,8 @@ export class Edge {
       protocol: 'http:', hostname: up.host, port: up.port, path: req.url ?? '/', label: up.id,
       agent: this.agentFor('http:', up.host, up.port), cache: cache ?? undefined,
     }, (connectErr) => {
-      if (connectErr) {
+      // The control plane is the only upstream of its host: never eject it, it is back seconds after a restart.
+      if (connectErr && route !== this.controlRoute) {
         this.balancer.eject(up);
         this.opts.log(`[edge] upstream ${up.host}:${up.port} (${route.slug}) unreachable; ejected for ${this.opts.ejectMs}ms`);
       }
@@ -551,6 +598,14 @@ export class Edge {
     const host = sanitizeHost(req.headers.host);
     if (!host) return fail('bad_request');
     rc.host = host;
+    const control = this.controlFor(host);
+    if (control) {
+      if (CONTROL_PRIVATE.test(url.split('?')[0])) return fail('not_found');
+      this.upgraded.add(socket);
+      socket.once('close', () => this.upgraded.delete(socket));
+      this.connectUpgrade(req, socket, head, control, rc, 0);
+      return;
+    }
     const match = this.table.lookup(host);
     if (!match || match.redirectTo) return fail('not_found');
     const route = match.route;
@@ -654,7 +709,7 @@ export class Edge {
       socket.off('close', onClientGone);
       if (socket.destroyed) return;
       if (!connected) {
-        this.balancer.eject(up);
+        if (route !== this.controlRoute) this.balancer.eject(up);
         if (attempt === 0) { this.connectUpgrade(req, socket, head, route, rc, 1, up); return; }
       }
       this.logUpgrade(req, rc, 502);

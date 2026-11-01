@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { id } from '@nav/shared/ids';
 import { SERVICE_PLANS, slugify, type CreateServiceInput, type Disk } from '@nav/shared';
+import { config } from '@nav/shared/config';
 import { notify, one, q, tx, type Row } from '../db/pool.ts';
 import { badRequest, changed, recordEvent } from './core.ts';
 import { listEnv, listFiles, replaceEnv, replaceFiles } from './env.ts';
@@ -32,10 +33,20 @@ export function validateDisk(disk: Disk | null | undefined): void {
   if (disk.sizeGB < 1 || disk.sizeGB > 1024) throw badRequest('disk size must be between 1 and 1024 GB');
 }
 
+/** Labels under the apps domain that belong to the platform (the dashboard host), never to a service. */
+export function reservedSlugs(): Set<string> {
+  const out = new Set<string>();
+  const suffix = `.${config.appsDomain}`;
+  if (config.dashboardHost.endsWith(suffix)) out.add(config.dashboardHost.slice(0, -suffix.length));
+  return out;
+}
+
 export async function uniqueServiceSlug(name: string): Promise<string> {
   const base = slugify(name);
+  const reserved = reservedSlugs();
   for (let i = 0; i < 50; i++) {
     const candidate = i === 0 ? base : `${base}-${randomBytes(2).toString('hex')}`;
+    if (reserved.has(candidate)) continue;
     const taken = (await one('SELECT 1 FROM services WHERE slug = $1 UNION ALL SELECT 1 FROM databases WHERE slug = $1', [candidate])) !== null;
     if (!taken) return candidate;
   }

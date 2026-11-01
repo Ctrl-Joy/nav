@@ -4,7 +4,12 @@ import { Resolver } from 'node:dns/promises';
 
 export interface DnsProvider {
   readonly name: string;
-  /** Adds a TXT record (other values on the same name must be kept). Returns a handle for removeTxt. */
+  /**
+   * The provider holds only one TXT value per name (DuckDNS): createTxt replaces the previous value. ACME
+   * authorizations are then validated one at a time, and the platform order skips the apex identifier.
+   */
+  readonly singleTxt?: boolean;
+  /** Adds a TXT record (other values on the same name must be kept, unless singleTxt). Returns a handle for removeTxt. */
   createTxt(fqdn: string, value: string): Promise<string>;
   removeTxt(handle: string): Promise<void>;
 }
@@ -73,6 +78,75 @@ export function cloudflareProvider(opts: CloudflareOptions): DnsProvider {
       const [zone, record] = handle.split('/');
       const r = await api<unknown>('DELETE', `/zones/${zone}/dns_records/${record}`);
       if (!r.success && !r.errors?.some((e) => e.code === 81044)) throw failure('deleting TXT record', r); // 81044: already gone
+    },
+  };
+}
+
+// --- DuckDNS -------------------------------------------------------------------------------------
+
+export interface DuckDnsOptions {
+  /** The account token shown on duckdns.org. */
+  token: string;
+  /** NAV_APPS_DOMAIN: `<sub>.duckdns.org` or a name below it. */
+  domain: string;
+  apiBase?: string;
+  fetch?: typeof fetch;
+}
+
+const DUCKDNS_SUFFIX = '.duckdns.org';
+
+/**
+ * The DuckDNS subdomain that owns `name`: the first label below duckdns.org
+ * (`onnav.duckdns.org`, `_acme-challenge.onnav.duckdns.org` and `x.onnav.duckdns.org` all give `onnav`).
+ */
+export function duckdnsSubdomain(name: string): string {
+  const n = name.trim().toLowerCase().replace(/\.$/, '');
+  if (!n.endsWith(DUCKDNS_SUFFIX)) throw new Error(`${name} is not a duckdns.org name (NAV_DNS_PROVIDER=duckdns needs NAV_APPS_DOMAIN=<sub>.duckdns.org)`);
+  const sub = n.slice(0, -DUCKDNS_SUFFIX.length).split('.').pop() ?? '';
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(sub)) throw new Error(`${name} has no valid DuckDNS subdomain label below duckdns.org`);
+  return sub;
+}
+
+/**
+ * DuckDNS keeps one TXT value per subdomain and serves it for every name below it, including
+ * `_acme-challenge.<sub>.duckdns.org`. `update?txt=` replaces the value, `clear=true` removes it; the API answers
+ * `OK` or `KO` (bad token, or a subdomain the account does not own) as plain text.
+ */
+export function duckdnsProvider(opts: DuckDnsOptions): DnsProvider {
+  const base = (opts.apiBase ?? 'https://www.duckdns.org').replace(/\/+$/, '');
+  const doFetch = opts.fetch ?? fetch;
+  const sub = duckdnsSubdomain(opts.domain);
+
+  async function update(params: Record<string, string>): Promise<string[]> {
+    const qs = new URLSearchParams({ domains: sub, token: opts.token, ...params, verbose: 'true' });
+    // The URL carries the token: never put it in an error message.
+    const what = params.clear ? 'clearing the TXT record' : 'setting the TXT record';
+    let res: Response;
+    try {
+      res = await doFetch(`${base}/update?${qs}`, { signal: AbortSignal.timeout(30_000) });
+    } catch (err) {
+      throw new Error(`DuckDNS ${what} of ${sub}.duckdns.org failed: ${(err as Error & { cause?: Error }).cause?.message ?? (err as Error).message}`);
+    }
+    const lines = (await res.text().catch(() => '')).split(/\r?\n/).map((l) => l.trim());
+    if (!res.ok) throw new Error(`DuckDNS ${what} of ${sub}.duckdns.org failed: HTTP ${res.status}`);
+    if (lines[0] !== 'OK') {
+      throw new Error(`DuckDNS ${what} of ${sub}.duckdns.org was refused (${lines[0] || 'empty response'}): check NAV_DUCKDNS_TOKEN and that ${sub} belongs to that account`);
+    }
+    return lines;
+  }
+
+  return {
+    name: 'duckdns',
+    singleTxt: true,
+    async createTxt(fqdn, value) {
+      const owner = duckdnsSubdomain(fqdn);
+      if (owner !== sub) throw new Error(`DuckDNS provider is configured for ${sub}.duckdns.org, not ${fqdn}`);
+      await update({ txt: value });
+      return sub;
+    },
+    async removeTxt(handle) {
+      if (handle !== sub) throw new Error(`unknown DuckDNS record handle ${handle}`);
+      await update({ txt: '', clear: 'true' });
     },
   };
 }

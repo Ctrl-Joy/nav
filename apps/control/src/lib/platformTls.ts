@@ -1,5 +1,5 @@
 // Platform TLS: one wildcard certificate for `*.<appsDomain>` + `<appsDomain>` so every service URL gets a trusted
-// certificate. Issued with ACME DNS-01 through a DnsProvider (lib/dns.ts) by a control-plane job, stored in
+// certificate (only `*.<appsDomain>` with a provider that holds a single TXT value, such as DuckDNS). Issued with ACME DNS-01 through a DnsProvider (lib/dns.ts) by a control-plane job, stored in
 // `certificates` under '*.<appsDomain>' (the edge serves it by SNI) and renewed 30 days before expiry. With
 // NAV_DNS_PROVIDER=manual the operator supplies PEM files instead, which the edge loads and hot-reloads.
 import { X509Certificate } from 'node:crypto';
@@ -9,7 +9,7 @@ import { config } from '@nav/shared/config';
 import { encrypt } from '@nav/shared/crypto';
 import { notify, one, q } from '../db/pool.ts';
 import { enqueue } from './core.ts';
-import { cloudflareProvider, waitForTxt, type DnsProvider } from './dns.ts';
+import { cloudflareProvider, duckdnsProvider, waitForTxt, type DnsProvider } from './dns.ts';
 import { acmeClient, isLocalDomain } from './domains.ts';
 
 export const PLATFORM_CERT_JOB = 'issue_platform_cert';
@@ -19,6 +19,9 @@ const RETRY_AFTER_HOURS = 6;
 
 const log = (m: string) => console.log(`[tls] ${m}`);
 export const platformCertDomain = (appsDomain = config.appsDomain) => `*.${appsDomain}`;
+/** Names on the platform certificate. A single-TXT provider skips the apex (see orderWildcard). */
+export const platformCertNames = (appsDomain: string, provider?: Pick<DnsProvider, 'singleTxt'> | null, includeApex = !provider?.singleTxt) =>
+  includeApex ? [platformCertDomain(appsDomain), appsDomain] : [platformCertDomain(appsDomain)];
 const isStaging = () => /staging/i.test(config.acmeDirectory);
 
 export type PlatformTlsMode = 'dns-01' | 'manual' | 'none';
@@ -39,8 +42,11 @@ export function dnsProviderFromConfig(): DnsProvider | null {
     case 'cloudflare':
       if (!config.platformTls.cloudflareApiToken) throw new Error('NAV_DNS_PROVIDER=cloudflare requires NAV_CLOUDFLARE_API_TOKEN');
       return cloudflareProvider({ token: config.platformTls.cloudflareApiToken });
+    case 'duckdns':
+      if (!config.platformTls.duckdnsToken) throw new Error('NAV_DNS_PROVIDER=duckdns requires NAV_DUCKDNS_TOKEN');
+      return duckdnsProvider({ token: config.platformTls.duckdnsToken, domain: config.appsDomain });
     default:
-      throw new Error(`unknown NAV_DNS_PROVIDER "${p}" (supported: cloudflare, manual)`);
+      throw new Error(`unknown NAV_DNS_PROVIDER "${p}" (supported: cloudflare, duckdns, manual)`);
   }
 }
 
@@ -53,28 +59,62 @@ export interface WildcardOrder {
   email?: string;
   /** Propagation check; defaults to waitForTxt against the authoritative nameservers. */
   waitFor?: (fqdn: string, values: string[]) => Promise<void>;
+  /** Also order `<appsDomain>`. Default: true, except for single-TXT providers. */
+  includeApex?: boolean;
   log?: (m: string) => void;
 }
 
 /**
  * Orders `*.<d>` + `<d>`. Both authorizations use `_acme-challenge.<d>`, so both TXT values are published
  * together, checked for propagation, then validated. The records are always removed afterwards.
+ *
+ * A single-TXT provider (DuckDNS) cannot publish both values at once, so its authorizations are validated one at a
+ * time: publish, wait for propagation, validate, remove, next. By default it orders only `*.<d>`: validating the apex
+ * right after the wildcard would need the CA to see a changed TXT value within the record's TTL, which resolver
+ * caching makes unreliable. Services use `<slug>.<d>`, so the apex is not needed.
  */
 export async function orderWildcard(o: WildcardOrder): Promise<{ certPem: string; keyPem: string; issuer: string; notAfter: Date }> {
   const acme = (await import('acme-client')).default;
   const say = o.log ?? (() => {});
   const waitFor = o.waitFor ?? ((fqdn, values) => waitForTxt(fqdn, values, { log: say }));
-  const names = [platformCertDomain(o.appsDomain), o.appsDomain];
+  const names = platformCertNames(o.appsDomain, o.provider, o.includeApex);
   await o.client.createAccount({ termsOfServiceAgreed: true, ...(o.email ? { contact: [`mailto:${o.email}`] } : {}) });
   const order = await o.client.createOrder({ identifiers: names.map((value) => ({ type: 'dns', value })) });
   const authzs: Authorization[] = await o.client.getAuthorizations(order);
-  const pending: Array<{ fqdn: string; value: string; challenge: Authorization['challenges'][number] }> = [];
+  const pending: PendingChallenge[] = [];
   for (const authz of authzs) {
     if (authz.status === 'valid') continue; // reused authorization
     const challenge = authz.challenges.find((c) => c.type === 'dns-01');
     if (!challenge) throw new Error(`no dns-01 challenge offered for ${authz.identifier.value}`);
     pending.push({ fqdn: `_acme-challenge.${authz.identifier.value}`, value: await o.client.getChallengeKeyAuthorization(challenge), challenge });
   }
+  if (o.provider.singleTxt) {
+    for (const p of pending) {
+      say(`setting TXT ${p.fqdn} via ${o.provider.name} (one authorization at a time)`);
+      let handle: string | null = null;
+      try {
+        handle = await o.provider.createTxt(p.fqdn, p.value);
+        await waitFor(p.fqdn, [p.value]);
+        await o.client.completeChallenge(p.challenge);
+        await o.client.waitForValidStatus(p.challenge);
+      } finally {
+        if (handle !== null) await o.provider.removeTxt(handle).catch((err) => say(`could not remove TXT record ${handle}: ${(err as Error).message}`));
+      }
+    }
+  } else {
+    await validateTogether(o, pending, waitFor, say);
+  }
+  const [key, csr] = await acme.crypto.createCsr({ commonName: names[0], altNames: names });
+  const finalized = await o.client.finalizeOrder(order, csr);
+  const certPem = await o.client.getCertificate(finalized);
+  const info = acme.crypto.readCertificateInfo(certPem);
+  return { certPem, keyPem: key.toString(), issuer: info.issuer.commonName ?? 'ACME', notAfter: info.notAfter };
+}
+
+type PendingChallenge = { fqdn: string; value: string; challenge: Authorization['challenges'][number] };
+
+/** Publishes every TXT value, waits for all of them, then validates each authorization. */
+async function validateTogether(o: WildcardOrder, pending: PendingChallenge[], waitFor: (fqdn: string, values: string[]) => Promise<void>, say: (m: string) => void): Promise<void> {
   const handles: string[] = [];
   try {
     for (const p of pending) {
@@ -89,11 +129,6 @@ export async function orderWildcard(o: WildcardOrder): Promise<{ certPem: string
   } finally {
     for (const h of handles) await o.provider.removeTxt(h).catch((err) => say(`could not remove TXT record ${h}: ${(err as Error).message}`));
   }
-  const [key, csr] = await acme.crypto.createCsr({ commonName: names[0], altNames: names });
-  const finalized = await o.client.finalizeOrder(order, csr);
-  const certPem = await o.client.getCertificate(finalized);
-  const info = acme.crypto.readCertificateInfo(certPem);
-  return { certPem, keyPem: key.toString(), issuer: info.issuer.commonName ?? 'ACME', notAfter: info.notAfter };
 }
 
 async function setStatus(status: string, fields: { lastError?: string | null; issued?: boolean } = {}): Promise<void> {
@@ -113,7 +148,7 @@ export async function issuePlatformCertificate(say: (m: string) => void = log): 
   if (!provider) return;
   await setStatus('issuing');
   try {
-    say(`requesting *.${config.appsDomain} + ${config.appsDomain} from ${config.acmeDirectory} (DNS-01 via ${provider.name})`);
+    say(`requesting ${platformCertNames(config.appsDomain, provider).join(' + ')} from ${config.acmeDirectory} (DNS-01 via ${provider.name})`);
     // acme-client reports network failures as a TypeError; check reachability first for a readable error.
     await fetch(config.acmeDirectory, { signal: AbortSignal.timeout(15_000) }).then(
       (r) => { if (!r.ok) throw new Error(`ACME directory ${config.acmeDirectory} returned HTTP ${r.status}`); },
@@ -149,7 +184,7 @@ export async function ensurePlatformCertificate(opts: { force?: boolean } = {}):
   const row = await one<{ not_after: Date }>('SELECT not_after FROM certificates WHERE domain = $1', [platformCertDomain()]);
   const daysLeft = row ? (new Date(row.not_after).getTime() - Date.now()) / 86400_000 : -1;
   if (mode === 'none') {
-    if (production && daysLeft <= 0) log(`WARNING: no certificate for *.${config.appsDomain}; the edge serves its self-signed development certificate and browsers will warn. Set NAV_DNS_PROVIDER=cloudflare + NAV_CLOUDFLARE_API_TOKEN (or NAV_DNS_PROVIDER=manual with NAV_WILDCARD_CERT_FILE / NAV_WILDCARD_KEY_FILE).`);
+    if (production && daysLeft <= 0) log(`WARNING: no certificate for *.${config.appsDomain}; the edge serves its self-signed development certificate and browsers will warn. Set NAV_DNS_PROVIDER=cloudflare + NAV_CLOUDFLARE_API_TOKEN, NAV_DNS_PROVIDER=duckdns + NAV_DUCKDNS_TOKEN (or NAV_DNS_PROVIDER=manual with NAV_WILDCARD_CERT_FILE / NAV_WILDCARD_KEY_FILE).`);
     return 'skipped';
   }
   if (!config.platformTls.enabled && !opts.force) {
@@ -177,9 +212,11 @@ export async function ensurePlatformCertificate(opts: { force?: boolean } = {}):
 /** Admin view of the platform certificate. */
 export async function platformTlsStatus() {
   const mode = platformTlsMode();
+  let provider: DnsProvider | null = null;
+  try { provider = dnsProviderFromConfig(); } catch { /* a misconfiguration shows up in lastError and the log */ }
   const base = {
     domain: config.appsDomain,
-    names: [platformCertDomain(), config.appsDomain],
+    names: platformCertNames(config.appsDomain, provider),
     mode,
     provider: config.platformTls.dnsProvider || null,
     enabled: mode === 'manual' || (mode === 'dns-01' && config.platformTls.enabled),

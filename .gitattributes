@@ -1,0 +1,2 @@
+# Shell scripts run on Linux servers: always check them out with LF line endings.
+*.sh text eol=lf

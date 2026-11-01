@@ -14,6 +14,11 @@ export const config = {
   dataDir,
   apiPort: int('NAV_API_PORT', 4000),
   dashboardUrl: process.env.NAV_DASHBOARD_URL ?? 'http://localhost:5180',
+  /**
+   * Public hostname the edge routes to the control plane (dashboard + API), e.g. `dashboard.<appsDomain>`.
+   * Unset: the edge only serves apps (development, or a separate reverse proxy in front of control).
+   */
+  dashboardHost: (process.env.NAV_DASHBOARD_HOST ?? '').trim().toLowerCase().replace(/\.$/, ''),
   apiPublicUrl: process.env.NAV_API_PUBLIC_URL ?? 'http://localhost:4000',
   appsDomain: process.env.NAV_APPS_DOMAIN ?? 'nav.localhost',
   edgeHttpPort: int('NAV_EDGE_HTTP_PORT', 7080),
@@ -34,10 +39,14 @@ export const config = {
   artifactMaxBytes: int('NAV_ARTIFACT_MAX_MB', 4096) * 1048576,
   acmeDirectory: process.env.NAV_ACME_DIRECTORY ?? 'https://acme-staging-v02.api.letsencrypt.org/directory',
   acmeEmail: process.env.NAV_ACME_EMAIL ?? '',
-  /** Certificate for `*.<appsDomain>` + `<appsDomain>`: issued via ACME DNS-01 ('cloudflare') or supplied as files ('manual'). */
+  /**
+   * Certificate for `*.<appsDomain>` + `<appsDomain>`: issued via ACME DNS-01 ('cloudflare', or 'duckdns' which
+   * covers only the wildcard) or supplied as files ('manual').
+   */
   platformTls: {
     dnsProvider: (process.env.NAV_DNS_PROVIDER ?? '').trim().toLowerCase(),
     cloudflareApiToken: process.env.NAV_CLOUDFLARE_API_TOKEN ?? '',
+    duckdnsToken: process.env.NAV_DUCKDNS_TOKEN ?? '',
     certFile: process.env.NAV_WILDCARD_CERT_FILE ?? '',
     keyFile: process.env.NAV_WILDCARD_KEY_FILE ?? '',
     /** DNS-01 issuance runs in production when a provider is set; elsewhere only with NAV_PLATFORM_TLS=1. */

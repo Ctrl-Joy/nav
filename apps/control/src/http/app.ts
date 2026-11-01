@@ -37,11 +37,22 @@ const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const SAML_ACS = /^\/api\/v1\/auth\/saml\/[\w-]+\/acs$/;
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
 
+/**
+ * NAV_TRUST_PROXY: '1' trusts every proxy hop; an address list such as '127.0.0.1' (behind the NAV edge on the
+ * same host) trusts only those, so the client IP and https scheme come from the edge's X-Forwarded-* headers and a
+ * client cannot spoof them. Unset or '0': ignore forwarding headers.
+ */
+export function trustProxySetting(v: string | undefined): boolean | string {
+  const s = (v ?? '').trim();
+  if (s === '' || s === '0') return false;
+  return s === '1' ? true : s;
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: process.env.NAV_LOG_LEVEL ?? 'warn' },
     bodyLimit: 2 * 1024 * 1024,
-    trustProxy: process.env.NAV_TRUST_PROXY === '1',
+    trustProxy: trustProxySetting(process.env.NAV_TRUST_PROXY),
   });
 
   await app.register(cookie);
