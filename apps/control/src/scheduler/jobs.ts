@@ -3,12 +3,14 @@
 import os from 'node:os';
 import { pool, q } from '../db/pool.ts';
 import { issueCertificate, verifyDomain } from '../lib/domains.ts';
+import { PLATFORM_CERT_JOB, issuePlatformCertificate } from '../lib/platformTls.ts';
 
-export const CONTROL_JOBS = ['verify_domain', 'issue_cert'];
+export const CONTROL_JOBS = ['verify_domain', 'issue_cert', PLATFORM_CERT_JOB];
 
 const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
   verify_domain: (p) => verifyDomain(p.domainId),
   issue_cert: (p) => issueCertificate(p.domainId, (m) => console.log(`[acme] ${m}`)),
+  [PLATFORM_CERT_JOB]: () => issuePlatformCertificate(),
 };
 
 const worker = `control:${os.hostname()}:${process.pid}`;

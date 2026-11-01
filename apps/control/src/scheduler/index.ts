@@ -7,6 +7,7 @@ import { SERVICE_PLANS } from '@nav/shared';
 import { notify, pool, q } from '../db/pool.ts';
 import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
+import { ensurePlatformCertificate } from '../lib/platformTls.ts';
 import { deleteStoredArtifact } from '@nav/shared/artifacts';
 import { snapshotJob } from '../http/routes/snapshots.ts';
 
@@ -172,6 +173,8 @@ async function dailyTick(): Promise<void> {
   }
   const renew = await q("SELECT d.id FROM custom_domains d JOIN certificates c ON c.domain = d.domain WHERE c.not_after < now() + interval '30 days'");
   for (const r of renew) await enqueue('issue_cert', { domainId: r.id }, { maxAttempts: 3 });
+  // The platform wildcard (*.<apps domain>) is renewed the same way, via DNS-01.
+  await ensurePlatformCertificate().catch((err) => console.error('[tls] wildcard renewal check:', (err as Error).message));
   // Re-check unverified domains periodically.
   const pending = await q("SELECT id FROM custom_domains WHERE verification_status <> 'verified' AND created_at > now() - interval '7 days'");
   for (const p of pending) await enqueue('verify_domain', { domainId: p.id });
