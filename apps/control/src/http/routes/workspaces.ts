@@ -4,7 +4,9 @@ import { z } from 'zod';
 import { decrypt, sha256 } from '@nav/shared/crypto';
 import { id } from '@nav/shared/ids';
 import { one, q, tx } from '../../db/pool.ts';
-import { badRequest, conflict, notFound, recordEvent } from '../../lib/core.ts';
+import { HttpError, badRequest, conflict, notFound, recordEvent } from '../../lib/core.ts';
+import { layout, sendMail } from '../../lib/mail.ts';
+import { config } from '@nav/shared/config';
 import * as ser from '../../lib/serialize.ts';
 import { lsRemote, validateRepoUrl } from '../../lib/git.ts';
 import { githubAppEnabled, installationRepos, userRepos } from '../../lib/github.ts';
@@ -33,8 +35,13 @@ export async function workspaceRoutes(app: FastifyInstance) {
   app.patch('/workspaces/:ws', async (req) => {
     const { ws } = req.params as { ws: string };
     await workspaceRole(req, ws, 'admin');
-    const { name } = z.object({ name: Name }).parse(req.body);
-    await q('UPDATE workspaces SET name = $2 WHERE id = $1', [ws, name]);
+    const body = z.object({ name: Name.optional(), requireTwoFactor: z.boolean().optional() }).parse(req.body);
+    if (body.requireTwoFactor) {
+      // Requiring 2FA must not lock out the admin turning it on.
+      const me = await one('SELECT totp_enabled_at FROM users WHERE id = $1', [requireUser(req).id]);
+      if (!me?.totp_enabled_at) throw new HttpError(400, 'mfa_required', 'turn on two-factor authentication for your own account first');
+    }
+    await q('UPDATE workspaces SET name = COALESCE($2, name), require_2fa = COALESCE($3, require_2fa) WHERE id = $1', [ws, body.name ?? null, body.requireTwoFactor ?? null]);
     return (await userWorkspaces(requireUser(req).id)).find((w) => w.id === ws);
   });
 
@@ -65,6 +72,8 @@ export async function workspaceRoutes(app: FastifyInstance) {
     const token = randomBytes(24).toString('base64url');
     const inviteId = id('inv');
     await q('INSERT INTO workspace_invites (id, workspace_id, email, role, token_hash) VALUES ($1,$2,$3,$4,$5)', [inviteId, ws, body.email, body.role, sha256(token)]);
+    const wsRow = await one('SELECT name FROM workspaces WHERE id = $1', [ws]);
+    void sendMail({ to: body.email, subject: `You're invited to ${wsRow?.name ?? 'a workspace'} on NAV`, ...layout(`Join ${wsRow?.name ?? 'the workspace'} on NAV`, [`${requireUser(req).name} invited you as ${body.role}.`, 'Sign up or log in with this email address and you will be added automatically.'], { label: 'Accept the invite', url: `${config.dashboardUrl}/signup?email=${encodeURIComponent(body.email)}` }) }).catch((e) => console.error('[mail]', e.message));
     return reply.status(201).send({ invite: { id: inviteId, email: body.email, role: body.role, token } });
   });
 
@@ -172,17 +181,17 @@ export async function workspaceRoutes(app: FastifyInstance) {
     const { ws } = req.params as { ws: string };
     await workspaceRole(req, ws);
     const row = await one('SELECT * FROM notification_settings WHERE workspace_id = $1', [ws]);
-    return { webhookUrl: row?.webhook_url ?? null, notifyOn: row?.notify_on ?? 'failure' };
+    return { webhookUrl: row?.webhook_url ?? null, notifyOn: row?.notify_on ?? 'failure', emailNotifyOn: row?.email_notify_on ?? 'failure' };
   });
 
   app.put('/workspaces/:ws/notifications', async (req) => {
     const { ws } = req.params as { ws: string };
     await workspaceRole(req, ws, 'admin');
-    const body = z.object({ webhookUrl: z.string().url().startsWith('https://').nullable(), notifyOn: z.enum(['all', 'failure', 'none']) }).parse(req.body);
+    const body = z.object({ webhookUrl: z.string().url().startsWith('https://').nullable(), notifyOn: z.enum(['all', 'failure', 'none']), emailNotifyOn: z.enum(['all', 'failure', 'none']).default('failure') }).parse(req.body);
     await q(
-      `INSERT INTO notification_settings (workspace_id, webhook_url, notify_on) VALUES ($1,$2,$3)
-       ON CONFLICT (workspace_id) DO UPDATE SET webhook_url = EXCLUDED.webhook_url, notify_on = EXCLUDED.notify_on`,
-      [ws, body.webhookUrl, body.notifyOn],
+      `INSERT INTO notification_settings (workspace_id, webhook_url, notify_on, email_notify_on) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (workspace_id) DO UPDATE SET webhook_url = EXCLUDED.webhook_url, notify_on = EXCLUDED.notify_on, email_notify_on = EXCLUDED.email_notify_on`,
+      [ws, body.webhookUrl, body.notifyOn, body.emailNotifyOn],
     );
     return body;
   });

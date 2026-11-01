@@ -1,12 +1,12 @@
 import { createContext, useContext } from 'react';
-import type { Role, User, Workspace } from '@nav/shared';
-import type { AppConfig } from '@/api/types';
+import type { Role } from '@nav/shared';
+import type { AppConfig, MeUser, WorkspaceInfo } from '@/api/types';
 
 export interface WorkspaceCtx {
   ws: string;
-  workspace: Workspace;
-  workspaces: Workspace[];
-  user: User;
+  workspace: WorkspaceInfo;
+  workspaces: WorkspaceInfo[];
+  user: MeUser;
   role: Role;
   /** developer+ can create/modify resources */
   canWrite: boolean;

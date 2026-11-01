@@ -43,6 +43,17 @@ export const DATABASE_PLANS: Plan[] = [
   { id: 'pro-8gb', name: 'Pro 8 GB', cpu: 2, memoryMB: 8192, priceMonthly: 100, kind: 'database' },
 ];
 
+/** Key Value (Redis-compatible) plans: memoryMB is the instance's maxmemory. */
+export const KEY_VALUE_PLANS: Plan[] = [
+  { id: 'free', name: 'Free', cpu: 0.1, memoryMB: 25, priceMonthly: 0, kind: 'database' },
+  { id: 'starter', name: 'Starter', cpu: 0.25, memoryMB: 256, priceMonthly: 10, kind: 'database' },
+  { id: 'standard', name: 'Standard', cpu: 0.5, memoryMB: 1024, priceMonthly: 32, kind: 'database' },
+  { id: 'pro', name: 'Pro', cpu: 1, memoryMB: 5120, priceMonthly: 135, kind: 'database' },
+  { id: 'pro-plus', name: 'Pro Plus', cpu: 2, memoryMB: 10240, priceMonthly: 250, kind: 'database' },
+];
+
+export const KEY_VALUE_POLICIES = ['allkeys-lru', 'noeviction', 'allkeys-lfu', 'volatile-lru', 'volatile-lfu', 'allkeys-random', 'volatile-random', 'volatile-ttl'] as const;
+
 export interface User {
   id: string;
   email: string;
@@ -133,6 +144,10 @@ export interface Service {
   prNumber: number | null;
   suspended: boolean;
   maintenanceMode: boolean;
+  ipAllowList: { cidr: string; description: string }[];
+  edgeCache: { enabled: boolean; maxTtlSeconds?: number };
+  shutdownDelaySeconds: number;
+  registryCredentialId: string | null;
   status: ServiceStatus;
   currentDeployId: string | null;
   url: string | null;              // public URL (web/static) e.g. http://my-app.nav.localhost:7080

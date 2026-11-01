@@ -11,6 +11,8 @@ import * as ser from '../../lib/serialize.ts';
 import { githubOAuthEnabled, oauthExchange } from '../../lib/github.ts';
 import { PROVIDERS, authorizeUrl, callbackUrl, exchange, pkcePair, providerEnabled, type Profile, type ProviderId } from '../../lib/identity.ts';
 import { SESSION_COOKIE, createSession, destroySession, hashPassword, newApiKey, requireUser, verifyPassword } from '../auth.ts';
+import { beginSession } from './mfa.ts';
+import { layout, sendMail } from '../../lib/mail.ts';
 
 const Email = z.string().trim().toLowerCase().email().max(254);
 const Password = z.string().min(8, 'must be at least 8 characters').max(256);
@@ -34,7 +36,7 @@ export async function userWorkspaces(userId: string) {
      WHERE m.user_id = $1 ORDER BY w.created_at`,
     [userId],
   );
-  return rows.map((r) => ({ id: r.id, name: r.name, slug: r.slug, role: r.role, createdAt: r.created_at }));
+  return rows.map((r) => ({ id: r.id, name: r.name, slug: r.slug, role: r.role, requireTwoFactor: r.require_2fa, createdAt: r.created_at }));
 }
 
 function userOut(r: Record<string, any>) {
@@ -46,6 +48,9 @@ function userOut(r: Record<string, any>) {
     avatarUrl: r.avatar_url,
     hasPassword: !!r.password_hash,
     emailVerified: !!r.email_verified_at,
+    mfaEnabled: !!r.totp_enabled_at,
+    emailNotifications: r.email_notifications ?? true,
+    recoveryCodesLeft: r.totp_enabled_at ? (r.recovery_codes ?? []).length : 0,
     createdAt: r.created_at,
   };
 }
@@ -167,7 +172,7 @@ async function finishOAuth(req: FastifyRequest, reply: FastifyReply, provider: P
     const userId = await resolveIdentity(provider, profile, connectTo);
     if (after) await after(userId);
     if (connectTo) return reply.redirect(`${config.dashboardUrl}/account?connected=${provider}#connections`);
-    await createSession(reply, req, userId);
+    if ((await beginSession(req, reply, userId, safeNext(st.n))) === 'mfa') return reply.redirect(`${config.dashboardUrl}/login/mfa`);
     return reply.redirect(`${config.dashboardUrl}${safeNext(st.n)}`);
   } catch (err) {
     const code = err instanceof SignInError ? err.code : 'provider_error';
@@ -220,7 +225,7 @@ export async function authRoutes(app: FastifyInstance) {
     // Always run a hash to keep timing uniform whether or not the user exists.
     const ok = await verifyPassword(body.password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !ok) throw new HttpError(401, 'invalid_credentials', 'incorrect email or password');
-    await createSession(reply, req, user.id);
+    if ((await beginSession(req, reply, user.id)) === 'mfa') return { mfaRequired: true };
     return { user: userOut(user), workspaces: await userWorkspaces(user.id) };
   });
 
@@ -245,7 +250,9 @@ export async function authRoutes(app: FastifyInstance) {
       await q('UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [user.id]);
       await q('INSERT INTO password_resets (id, user_id, expires_at, ip) VALUES ($1,$2,$3,$4)', [sha256(token), user.id, new Date(Date.now() + RESET_TTL_MS), req.ip]);
       // NAV has no mail transport yet: the operator relays this link (it is only ever written to the server log).
-      console.log(`[auth] password reset requested for ${user.email}: ${config.dashboardUrl}/reset-password?token=${token} (expires in 1 hour)`);
+      const link = `${config.dashboardUrl}/reset-password?token=${token}`;
+      console.log(`[auth] password reset requested for ${user.email}: ${link} (expires in 1 hour)`);
+      void sendMail({ to: user.email, subject: 'Reset your NAV password', ...layout('Reset your password', ['Someone asked to reset the password for your NAV account. The link works once and expires in an hour.', 'If this was not you, ignore this email.'], { label: 'Choose a new password', url: link }) }).catch((e) => console.error('[mail]', e.message));
     }
     // Same answer whether or not the account exists.
     return reply.status(202).send({ ok: true });
@@ -271,7 +278,7 @@ export async function authRoutes(app: FastifyInstance) {
       await c.query('DELETE FROM sessions WHERE user_id = $1', [uid]);
       return uid;
     });
-    await createSession(reply, req, userId);
+    if ((await beginSession(req, reply, userId)) === 'mfa') return { mfaRequired: true };
     const user = await one('SELECT * FROM users WHERE id = $1', [userId]);
     return { user: userOut(user!), workspaces: await userWorkspaces(userId) };
   });
@@ -351,7 +358,8 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.patch('/auth/me', async (req) => {
     const u = requireUser(req);
-    const body = z.object({ name: z.string().trim().min(1).max(100).optional(), avatarUrl: z.string().max(2000).nullable().optional() }).parse(req.body);
+    const body = z.object({ name: z.string().trim().min(1).max(100).optional(), avatarUrl: z.string().max(2000).nullable().optional(), emailNotifications: z.boolean().optional() }).parse(req.body);
+    if (body.emailNotifications !== undefined) await q('UPDATE users SET email_notifications = $2 WHERE id = $1', [u.id, body.emailNotifications]);
     if (body.avatarUrl) {
       // Avatars can only come from a connected provider, never an arbitrary URL.
       const ok = await one('SELECT 1 FROM user_identities WHERE user_id = $1 AND avatar_url = $2', [u.id, body.avatarUrl]);

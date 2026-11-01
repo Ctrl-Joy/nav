@@ -5,6 +5,7 @@ import { pool } from './db/pool.ts';
 import { buildApp } from './http/app.ts';
 import { startScheduler } from './scheduler/index.ts';
 import { startControlJobs } from './scheduler/jobs.ts';
+import { startLogStreams, startMetricsStreams } from './scheduler/streams.ts';
 import { startNotifier } from './scheduler/notifier.ts';
 
 if (!process.env.NAV_MASTER_KEY) {
@@ -19,6 +20,8 @@ console.log(`[control] API listening on http://localhost:${config.apiPort}/api/v
 startScheduler();
 startNotifier();
 startControlJobs();
+startLogStreams();
+startMetricsStreams();
 
 const shutdown = async () => {
   await app.close().catch(() => {});

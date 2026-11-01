@@ -2,7 +2,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ApiKey, Page } from '@nav/shared';
 import { api, isApiError, request } from './client';
 import { qk } from './keys';
-import type { AppConfig, AuthProvider, CreateApiKeyResponse, IdentityInfo, MeResponse, SessionInfo } from './types';
+import {
+  isMfaChallenge,
+  type AppConfig,
+  type AuthProvider,
+  type CreateApiKeyResponse,
+  type IdentityInfo,
+  type MeResponse,
+  type MfaChallenge,
+  type MfaLoginResponse,
+  type SessionInfo,
+} from './types';
 
 export function useConfig() {
   return useQuery({
@@ -34,10 +44,19 @@ export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { email: string; password: string }) =>
-      request<MeResponse>('/auth/login', { method: 'POST', body, skipAuthRedirect: true }),
+      request<MeResponse | MfaChallenge>('/auth/login', { method: 'POST', body, skipAuthRedirect: true }),
     onSuccess: (data) => {
-      qc.setQueryData(qk.me, data);
+      if (!isMfaChallenge(data)) qc.setQueryData(qk.me, data);
     },
+  });
+}
+
+/** Second sign-in step: an authenticator code or a recovery code for the challenge cookie. */
+export function useLoginMfa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => request<MfaLoginResponse>('/auth/login/mfa', { method: 'POST', body: { code }, skipAuthRedirect: true }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 
@@ -114,8 +133,10 @@ export function useResetPassword() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { token: string; password: string }) =>
-      request<MeResponse>('/auth/password/reset', { method: 'POST', body, skipAuthRedirect: true }),
-    onSuccess: (data) => qc.setQueryData(qk.me, data),
+      request<MeResponse | MfaChallenge>('/auth/password/reset', { method: 'POST', body, skipAuthRedirect: true }),
+    onSuccess: (data) => {
+      if (!isMfaChallenge(data)) qc.setQueryData(qk.me, data);
+    },
   });
 }
 
@@ -128,7 +149,41 @@ export function useSsoLookup() {
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name?: string; avatarUrl?: string | null }) => api.patch<Pick<MeResponse, 'user'>>('/auth/me', body),
+    mutationFn: (body: { name?: string; avatarUrl?: string | null; emailNotifications?: boolean }) => api.patch<Pick<MeResponse, 'user'>>('/auth/me', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
+  });
+}
+
+// Two-factor authentication ------------------------------------------------------------------
+
+export function useMfaSetup() {
+  return useMutation({ mutationFn: () => api.post<{ secret: string; otpauthUrl: string }>('/auth/mfa/setup') });
+}
+
+export function useMfaEnable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.post<{ enabled: true; recoveryCodes: string[] }>('/auth/mfa/enable', { code }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.me });
+      qc.invalidateQueries({ queryKey: qk.sessions });
+    },
+  });
+}
+
+/** Turning 2FA off takes a current code, or the account password. */
+export function useMfaDisable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { code?: string; password?: string }) => api.post<{ enabled: false }>('/auth/mfa/disable', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
+  });
+}
+
+export function useRegenerateRecoveryCodes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { code?: string; password?: string }) => api.post<{ recoveryCodes: string[] }>('/auth/mfa/recovery-codes', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }

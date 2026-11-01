@@ -17,7 +17,11 @@ import type {
 import { DEPLOY_ACTIVE } from '@nav/shared';
 import { api } from './client';
 import { qk, type MetricsRange } from './keys';
-import type { CreateServiceResponse, ListFilters } from './types';
+import type { CreateServiceResponse, DiskSnapshot, ListFilters, LogStream, LogStreamInput } from './types';
+
+/** PATCH /services/:id body, including the settings not yet in @nav/shared's UpdateServiceInput. */
+export type ServiceUpdate = UpdateServiceInput &
+  Partial<Pick<Service, 'ipAllowList' | 'edgeCache' | 'shutdownDelaySeconds' | 'registryCredentialId'>>;
 
 // Services -----------------------------------------------------------------------------------
 
@@ -68,7 +72,7 @@ export function useUpdateService(service: Pick<Service, 'id' | 'workspaceId'>) {
   const qc = useQueryClient();
   const inv = useInvalidateService();
   return useMutation({
-    mutationFn: (input: UpdateServiceInput) => api.patch<Service>(`/services/${service.id}`, input),
+    mutationFn: (input: ServiceUpdate) => api.patch<Service>(`/services/${service.id}`, input),
     onSuccess: (data) => {
       qc.setQueryData(qk.service(service.id), data);
       inv(service);
@@ -128,6 +132,65 @@ export function useRotateDeployHook(service: Pick<Service, 'id' | 'workspaceId'>
     mutationFn: () => api.post<{ deployHookUrl: string }>(`/services/${service.id}/deploy-hook/rotate`),
     onSuccess: (data) => {
       qc.setQueryData<Service>(qk.service(service.id), (old) => (old ? { ...old, deployHookUrl: data.deployHookUrl } : old));
+    },
+  });
+}
+
+export function usePurgeCache(serviceId: string) {
+  return useMutation({ mutationFn: () => api.post<unknown>(`/services/${serviceId}/cache/purge`) });
+}
+
+// Per-service log stream override ----------------------------------------------------------------
+
+export function useServiceLogStream(serviceId: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.serviceLogStream(serviceId),
+    queryFn: () => api.get<{ override: LogStream | null }>(`/services/${serviceId}/log-stream`),
+    enabled,
+  });
+}
+
+export function useSaveServiceLogStream(serviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LogStreamInput) => api.put<LogStream>(`/services/${serviceId}/log-stream`, body),
+    onSuccess: (data) => qc.setQueryData(qk.serviceLogStream(serviceId), { override: data }),
+  });
+}
+
+export function useDeleteServiceLogStream(serviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del(`/services/${serviceId}/log-stream`),
+    onSuccess: () => qc.setQueryData(qk.serviceLogStream(serviceId), { override: null }),
+  });
+}
+
+// Disk snapshots -----------------------------------------------------------------------------------
+
+export function useDiskSnapshots(serviceId: string) {
+  return useQuery({
+    queryKey: qk.serviceSnapshots(serviceId),
+    queryFn: () => api.get<{ items: DiskSnapshot[] }>(`/services/${serviceId}/disk/snapshots`),
+    refetchInterval: (q) => (q.state.data?.items.some((s) => s.status === 'pending' || s.status === 'restoring') ? 5_000 : false),
+  });
+}
+
+export function useCreateSnapshot(serviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<DiskSnapshot>(`/services/${serviceId}/disk/snapshots`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.serviceSnapshots(serviceId) }),
+  });
+}
+
+export function useRestoreSnapshot(serviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (snapshotId: string) => api.post<DiskSnapshot>(`/disk-snapshots/${snapshotId}/restore`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.serviceSnapshots(serviceId) });
+      qc.invalidateQueries({ queryKey: qk.service(serviceId), exact: true });
     },
   });
 }

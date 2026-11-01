@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Check, Laptop, Monitor, Moon, Pencil, Smartphone, Sun, X } from 'lucide-react';
+import { Check, Copy, Download, Laptop, Monitor, Moon, Pencil, ShieldCheck, Smartphone, Sun, X } from 'lucide-react';
 import {
-  providerUrl, useChangeEmail, useChangePassword, useDeleteAccount, useDisconnectIdentity, useIdentities, useMe,
-  useRevokeSession, useSessions, useUpdateProfile,
+  providerUrl, useChangeEmail, useChangePassword, useDeleteAccount, useDisconnectIdentity, useIdentities, useMe, useMfaDisable,
+  useMfaEnable, useMfaSetup, useRegenerateRecoveryCodes, useRevokeSession, useSessions, useUpdateProfile,
 } from '@/api/auth';
 import { errorMessage } from '@/api/client';
 import type { AuthProvider, SessionInfo } from '@/api/types';
 import { RelativeTime } from '@/components/RelativeTime';
-import { Button, Dialog, useConfirm, useToast } from '@/components/ui';
+import { Button, CopyField, Dialog, Switch, useConfirm, useToast } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { copyText, downloadText } from '@/lib/misc';
 import { getTheme, setTheme, type Theme } from '@/lib/theme';
 import { useTitle } from '@/lib/useTitle';
 import { PROVIDER_NAMES, ProviderIcon, oauthErrorMessage } from '../auth/providers';
@@ -18,6 +19,7 @@ const SECTIONS = [
   ['profile', 'Profile'],
   ['appearance', 'Appearance'],
   ['security', 'Account Security'],
+  ['notifications', 'Notifications'],
   ['connections', 'Connections'],
   ['api-keys', 'API Keys'],
   ['delete', 'Delete Account'],
@@ -227,6 +229,228 @@ function SessionRow({ s, onRevoke, busy }: { s: SessionInfo; onRevoke: () => voi
   );
 }
 
+/** "JBSWY3DPEHPK3PXP" -> "JBSW Y3DP EHPK 3PXP" for typing into an authenticator app. */
+function groupSecret(secret: string): string {
+  return secret.replace(/(.{4})/g, '$1 ').trim();
+}
+
+function RecoveryCodes({ codes }: { codes: string[] }) {
+  const toast = useToast();
+  const text = codes.join('\n');
+  return (
+    <div className="space-y-3">
+      <div role="note" className="border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-[13.5px] text-fg">
+        Store these recovery codes somewhere safe, like a password manager. Each one signs you in once if you lose your device. They won't be shown again.
+      </div>
+      <ul className="grid grid-cols-2 gap-x-6 gap-y-1.5 border border-border-strong bg-surface-2 px-4 py-3 font-mono text-[14px] text-fg">
+        {codes.map((c) => (
+          <li key={c}>{c}</li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" icon={<Copy className="size-3.5" />} onClick={async () => ((await copyText(text)) ? toast.success('Recovery codes copied') : toast.error('Copy failed'))}>
+          Copy
+        </Button>
+        <Button size="sm" icon={<Download className="size-3.5" />} onClick={() => downloadText('nav-recovery-codes.txt', `NAV recovery codes\n\n${text}\n`)}>
+          Download
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MfaSetupDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const setup = useMfaSetup();
+  const enable = useMfaEnable();
+  const [code, setCode] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setCode('');
+    setCodes(null);
+    enable.reset();
+    setup.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    enable.mutate(code.replace(/\s+/g, ''), { onSuccess: (res) => setCodes(res.recoveryCodes) });
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      dismissable={!codes && !enable.isPending}
+      size="lg"
+      title={codes ? 'Save your recovery codes' : 'Set up two-factor authentication'}
+      description={codes ? 'Two-factor authentication is on. Your other sessions were signed out.' : undefined}
+    >
+      {codes ? (
+        <div className="space-y-4">
+          <RecoveryCodes codes={codes} />
+          <div className="flex justify-end">
+            <Button variant="primary" onClick={onClose}>I've saved my codes</Button>
+          </div>
+        </div>
+      ) : setup.isError ? (
+        <p role="alert" className="text-[14px] text-danger">{errorMessage(setup.error)}</p>
+      ) : !setup.data ? (
+        <p className="text-[14px] text-fg-muted">Generating a secret…</p>
+      ) : (
+        <form onSubmit={submit} className="space-y-5">
+          <ol className="list-decimal space-y-4 pl-5 text-[14px] text-fg">
+            <li>
+              Add NAV to an authenticator app (1Password, Google Authenticator, Authy…) by entering this setup key:
+              <div className="mt-2 flex items-center gap-2">
+                <code className="flex-1 border border-border-strong bg-surface-2 px-3 py-2 font-mono text-[15px] tracking-wider select-all">{groupSecret(setup.data.secret)}</code>
+              </div>
+              <p className="mt-3 text-[13px] text-fg-muted">Or, on a device with the app installed, use the setup link:</p>
+              <CopyField value={setup.data.otpauthUrl} className="mt-1.5" />
+            </li>
+            <li>
+              Enter the 6-digit code the app shows:
+              <input
+                className={cn(inputCls, 'mt-2 max-w-[220px] font-mono tracking-[0.2em]')}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                aria-label="Authentication code"
+                maxLength={7}
+                autoFocus
+                required
+              />
+            </li>
+          </ol>
+          {enable.error && <p role="alert" className="text-[14px] text-danger">{errorMessage(enable.error)}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={enable.isPending}>Cancel</Button>
+            <Button type="submit" variant="primary" loading={enable.isPending} disabled={code.replace(/\s+/g, '').length !== 6}>Turn on</Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+/** Re-authenticates with a current code (or the password) to turn 2FA off or get new recovery codes. */
+function MfaConfirmDialog({ mode, onClose }: { mode: 'disable' | 'codes' | null; onClose: () => void }) {
+  const me = useMe();
+  const disable = useMfaDisable();
+  const regen = useRegenerateRecoveryCodes();
+  const toast = useToast();
+  const [usePassword, setUsePassword] = useState(false);
+  const [value, setValue] = useState('');
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const m = mode === 'disable' ? disable : regen;
+
+  useEffect(() => {
+    setValue('');
+    setUsePassword(false);
+    setCodes(null);
+    disable.reset();
+    regen.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const body = usePassword ? { password: value } : { code: value.trim() };
+    if (mode === 'disable') {
+      disable.mutate(body, { onSuccess: () => { toast.success('Two-factor authentication turned off'); onClose(); } });
+    } else regen.mutate(body, { onSuccess: (res) => setCodes(res.recoveryCodes) });
+  };
+
+  return (
+    <Dialog
+      open={!!mode}
+      onClose={onClose}
+      dismissable={!codes && !m.isPending}
+      title={codes ? 'Your new recovery codes' : mode === 'disable' ? 'Turn off two-factor authentication?' : 'Generate new recovery codes?'}
+      description={codes ? 'Your previous codes no longer work.' : mode === 'disable' ? 'Signing in will only need your password or a connected account.' : 'Your current recovery codes will stop working.'}
+    >
+      {codes ? (
+        <div className="space-y-4">
+          <RecoveryCodes codes={codes} />
+          <div className="flex justify-end">
+            <Button variant="primary" onClick={onClose}>I've saved my codes</Button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            className={cn(inputCls, !usePassword && 'font-mono')}
+            type={usePassword ? 'password' : 'text'}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={usePassword ? 'Current password' : 'Authentication or recovery code'}
+            aria-label={usePassword ? 'Current password' : 'Authentication code'}
+            autoComplete={usePassword ? 'current-password' : 'one-time-code'}
+            autoFocus
+            required
+          />
+          {me.data?.user.hasPassword && (
+            <button type="button" className="text-[13.5px] text-fg-muted hover:text-fg" onClick={() => { setUsePassword((p) => !p); setValue(''); }}>
+              {usePassword ? 'Use an authentication code instead' : 'Use your password instead'}
+            </button>
+          )}
+          {m.error && <p role="alert" className="text-[14px] text-danger">{errorMessage(m.error)}</p>}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={onClose} disabled={m.isPending}>Cancel</Button>
+            <Button type="submit" variant={mode === 'disable' ? 'danger' : 'primary'} loading={m.isPending}>
+              {mode === 'disable' ? 'Turn off' : 'Generate codes'}
+            </Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+function TwoFactorRow() {
+  const me = useMe();
+  const user = me.data?.user;
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<'disable' | 'codes' | null>(null);
+  if (!user) return null;
+  const left = user.recoveryCodesLeft ?? 0;
+  return (
+    <Row
+      label="Two-factor authentication"
+      hint="Require a code from an authenticator app, in addition to your password or connected account, when signing in."
+    >
+      {user.mfaEnabled ? (
+        <>
+          <div className="flex flex-wrap items-center gap-3 border border-border-strong px-3.5 py-3 text-[15px] text-fg">
+            <ShieldCheck className="size-5 text-success" aria-hidden="true" />
+            <span className="flex-1">On</span>
+            <span className={cn('text-[13px]', left <= 2 ? 'text-warning' : 'text-fg-muted')}>
+              {left} recovery {left === 1 ? 'code' : 'codes'} left
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmMode('codes')}>New recovery codes</Button>
+            <Button variant="outline-danger" onClick={() => setConfirmMode('disable')}>Turn off</Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <input className={inputCls} value="Off" disabled aria-label="Two-factor authentication" />
+          <div className="mt-3 flex justify-end">
+            <Button variant="primary" icon={<ShieldCheck className="size-4" />} onClick={() => setSetupOpen(true)}>Set up</Button>
+          </div>
+        </>
+      )}
+      <MfaSetupDialog open={setupOpen} onClose={() => setSetupOpen(false)} />
+      <MfaConfirmDialog mode={confirmMode} onClose={() => setConfirmMode(null)} />
+    </Row>
+  );
+}
+
 function SecuritySection() {
   const me = useMe();
   const user = me.data?.user;
@@ -267,6 +491,7 @@ function SecuritySection() {
           </>
         )}
       </Row>
+      <TwoFactorRow />
       <Row label="Sessions" hint="Browsers and devices signed in to your account.">
         <ul className="divide-y divide-border border-y border-border">
           {(sessions.data?.items ?? []).map((s) => (
@@ -281,6 +506,30 @@ function SecuritySection() {
             </Button>
           </div>
         )}
+      </Row>
+    </Section>
+  );
+}
+
+function NotificationsSection() {
+  const me = useMe();
+  const user = me.data?.user;
+  const update = useUpdateProfile();
+  const toast = useToast();
+  if (!user) return null;
+  const on = user.emailNotifications ?? true;
+  return (
+    <Section id="notifications" title="Notifications">
+      <Row label="Email notifications" hint="Deploy emails from your workspaces, sent when a workspace's notification settings include email.">
+        <Switch
+          checked={on}
+          disabled={update.isPending}
+          label={on ? 'On' : 'Off'}
+          description={user.email}
+          onChange={(v) =>
+            update.mutate({ emailNotifications: v }, { onSuccess: () => toast.success(v ? 'Email notifications on' : 'Email notifications off'), onError: (err) => toast.error('Could not update notifications', errorMessage(err)) })
+          }
+        />
       </Row>
     </Section>
   );
@@ -443,6 +692,7 @@ export function AccountSettingsPage() {
           <ProfileSection />
           <AppearanceSection />
           <SecuritySection />
+          <NotificationsSection />
           <ConnectionsSection />
           <ApiKeysSection />
           <DeleteSection />

@@ -22,6 +22,14 @@ export const qk = {
   wsEvents: (ws: string) => ['ws', ws, 'events'] as const,
   notifications: (ws: string) => ['ws', ws, 'notifications'] as const,
   repos: (ws: string) => ['ws', ws, 'repos'] as const,
+  webhooks: (ws: string) => ['ws', ws, 'webhooks'] as const,
+  logStreams: (ws: string) => ['ws', ws, 'log-streams'] as const,
+  metricsStream: (ws: string) => ['ws', ws, 'metrics-stream'] as const,
+  registryCredentials: (ws: string) => ['ws', ws, 'registry-credentials'] as const,
+  auditLogs: (ws: string, f: { action?: string; actor?: string }) => ['ws', ws, 'audit-logs', f] as const,
+  keyValues: (ws: string) => ['ws', ws, 'key-value'] as const,
+  webhookEvents: ['webhook-events'] as const,
+  keyValuePlans: ['key-value-plans'] as const,
 
   service: (id: string) => ['service', id] as const,
   serviceDeploys: (id: string) => ['service', id, 'deploys'] as const,
@@ -33,6 +41,8 @@ export const qk = {
   servicePreviews: (id: string) => ['service', id, 'previews'] as const,
   serviceRuns: (id: string) => ['service', id, 'runs'] as const,
   serviceMetrics: (id: string, range: MetricsRange) => ['service', id, 'metrics', range] as const,
+  serviceLogStream: (id: string) => ['service', id, 'log-stream'] as const,
+  serviceSnapshots: (id: string) => ['service', id, 'disk-snapshots'] as const,
 
   deploy: (id: string) => ['deploy', id] as const,
   run: (id: string) => ['run', id] as const,
@@ -42,6 +52,13 @@ export const qk = {
   databaseCredentials: (id: string) => ['database', id, 'credentials'] as const,
   databaseBackups: (id: string) => ['database', id, 'backups'] as const,
   databaseMetrics: (id: string, range: MetricsRange) => ['database', id, 'metrics', range] as const,
+
+  webhookSecret: (id: string) => ['webhook', id, 'secret'] as const,
+  webhookDeliveries: (id: string) => ['webhook', id, 'deliveries'] as const,
+
+  keyValue: (id: string) => ['key-value', id] as const,
+  keyValueCredentials: (id: string) => ['key-value', id, 'credentials'] as const,
+  keyValueLogs: (id: string) => ['key-value', id, 'logs'] as const,
 
   envGroup: (id: string) => ['env-group', id] as const,
   blueprint: (id: string) => ['blueprint', id] as const,

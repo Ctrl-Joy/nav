@@ -2,10 +2,11 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import {
-  providerUrl, useConfig, useForgotPassword, useLogin, useMe, useResetPassword, useResetToken, useSignup, useSsoLookup,
+  providerUrl, useConfig, useForgotPassword, useLogin, useLoginMfa, useMe, useResetPassword, useResetToken, useSignup, useSsoLookup,
 } from '@/api/auth';
 import { errorMessage, isApiError } from '@/api/client';
-import type { AuthProvider } from '@/api/types';
+import { isMfaChallenge, type AuthProvider } from '@/api/types';
+import { useToast } from '@/components/ui';
 import { Logo } from '@/components/Logo';
 import { FullPageSpinner } from '@/layouts/RootLayout';
 import { useTitle } from '@/lib/useTitle';
@@ -127,7 +128,15 @@ export function LoginPage() {
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     setNotice(null);
-    login.mutate({ email, password }, { onSuccess: () => navigate(next ?? '/app', { replace: true }) });
+    login.mutate(
+      { email, password },
+      {
+        onSuccess: (data) =>
+          isMfaChallenge(data)
+            ? navigate(`/login/mfa${next ? `?next=${encodeURIComponent(next)}` : ''}`, { replace: true })
+            : navigate(next ?? '/app', { replace: true }),
+      },
+    );
   };
   const failed = login.error ? (isApiError(login.error) && login.error.status === 401 ? 'Incorrect email or password.' : errorMessage(login.error)) : null;
 
@@ -276,7 +285,7 @@ export function ResetPasswordPage() {
     e.preventDefault();
     if (password !== confirm) { setMismatch(true); return; }
     setMismatch(false);
-    reset.mutate({ token, password }, { onSuccess: () => navigate('/app', { replace: true }) });
+    reset.mutate({ token, password }, { onSuccess: (data) => navigate(isMfaChallenge(data) ? '/login/mfa' : '/app', { replace: true }) });
   };
   return (
     <AuthLayout title="Choose a new password" sub={<>For {check.data?.email}. You'll be signed out everywhere else.</>}>
@@ -287,6 +296,66 @@ export function ResetPasswordPage() {
         {reset.error && <Alert kind="err">{errorMessage(reset.error)}</Alert>}
         <Submit busy={reset.isPending}>Set password and sign in</Submit>
       </form>
+    </AuthLayout>
+  );
+}
+
+/** Second sign-in step for accounts with two-factor authentication (password, reset and OAuth sign-ins land here). */
+export function LoginMfaPage() {
+  useTitle('Two-factor authentication');
+  const me = useMe();
+  const verify = useLoginMfa();
+  const toast = useToast();
+  const [params] = useSearchParams();
+  const next = safeNext(params.get('next'));
+  const [code, setCode] = useState('');
+  const [target, setTarget] = useState<string | null>(null);
+
+  if (me.isLoading) return <FullPageSpinner />;
+  if (me.data) return <Navigate to={target ?? next ?? '/app'} replace />;
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    verify.mutate(code.trim(), {
+      onSuccess: (res) => {
+        // Set before the refreshed user arrives, which renders the redirect above.
+        setTarget(next ?? safeNext(res.next) ?? '/app');
+        if (res.usedRecoveryCode) {
+          const left = res.recoveryCodesLeft ?? 0;
+          toast.info('Recovery code used', `${left} recovery ${left === 1 ? 'code' : 'codes'} left. Generate new ones in Account settings.`);
+        }
+      },
+    });
+  };
+  const expired = isApiError(verify.error) && verify.error.code === 'mfa_expired';
+  const failed = verify.error
+    ? expired
+      ? 'Your sign-in expired. Start again.'
+      : isApiError(verify.error) && verify.error.code === 'invalid_code'
+        ? "That code isn't valid. Check your authenticator app and try again."
+        : errorMessage(verify.error)
+    : null;
+
+  return (
+    <AuthLayout title="Two-factor authentication" sub="Enter the 6-digit code from your authenticator app.">
+      <form className="au-form" style={{ marginTop: 30 }} onSubmit={onSubmit}>
+        <TextField
+          id="code"
+          label="Authentication code"
+          value={code}
+          onChange={setCode}
+          placeholder="123 456"
+          autoComplete="one-time-code"
+          autoFocus
+          invalid={!!failed}
+          hint="Lost your device? Enter one of your recovery codes instead, like abcd-efgh-jkmn."
+        />
+        {failed && <Alert kind="err">{failed}</Alert>}
+        <Submit busy={verify.isPending || verify.isSuccess}>Verify</Submit>
+      </form>
+      <div className="au-links">
+        <Link to={`/login${next ? `?next=${encodeURIComponent(next)}` : ''}`}>{expired ? 'Sign in again' : 'Back to sign in'}</Link>
+      </div>
     </AuthLayout>
   );
 }

@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import type { Environment, Event as NavEvent, Member, Page, Project, Repo, Role, Workspace } from '@nav/shared';
 import { api } from './client';
 import { qk } from './keys';
-import type { AddMemberResponse, NotificationSettings } from './types';
+import type { AddMemberResponse, NotificationSettings, WorkspaceInfo } from './types';
 
 export function useWorkspaces() {
   return useQuery({ queryKey: qk.workspaces, queryFn: () => api.get<Page<Workspace>>('/workspaces') });
@@ -22,7 +22,7 @@ export function useCreateWorkspace() {
 export function useUpdateWorkspace(ws: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => api.patch<Workspace>(`/workspaces/${ws}`, { name }),
+    mutationFn: (body: { name?: string; requireTwoFactor?: boolean }) => api.patch<WorkspaceInfo>(`/workspaces/${ws}`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.workspaces });
       qc.invalidateQueries({ queryKey: qk.me });

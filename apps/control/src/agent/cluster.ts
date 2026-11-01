@@ -113,14 +113,14 @@ export async function waitInstances(ids: string[], timeoutMs: number, signal?: A
  * Stops instances wherever they run. A pending instance that no agent has picked up yet is cancelled in place;
  * the rest are stopped by their node. With `wait`, returns once all of them are down.
  */
-export async function stopInstances(ids: string[], graceMs = 30_000, wait = false): Promise<void> {
+export async function stopInstances(ids: string[], graceMs?: number, wait = false): Promise<void> {
   if (!ids.length) return;
   await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE id = ANY($1) AND status = 'pending'", [ids]);
   const rows = await q("SELECT id, node_id FROM instances WHERE id = ANY($1) AND status NOT IN ('stopped','lost')", [ids]);
-  for (const r of rows) await enqueue('instance_stop', { instanceId: r.id, graceMs }, { nodeId: r.node_id, maxAttempts: 3 });
+  for (const r of rows) await enqueue('instance_stop', { instanceId: r.id, graceMs: graceMs ?? null }, { nodeId: r.node_id, maxAttempts: 3 });
   await notify('nav_routes');
   if (!wait || !rows.length) return;
-  const deadline = Date.now() + graceMs + 30_000;
+  const deadline = Date.now() + (graceMs ?? 300_000) + 30_000;
   while (Date.now() < deadline) {
     const left = await one(
       `SELECT count(*)::int AS n FROM instances i LEFT JOIN nodes n ON n.id = i.node_id

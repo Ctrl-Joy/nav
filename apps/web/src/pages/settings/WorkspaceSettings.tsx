@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useLocation } from 'react-router-dom';
-import { CheckCircle2, Mail, Pencil, Trash2, UserPlus } from 'lucide-react';
+import { CheckCircle2, FileClock, Mail, Trash2, UserPlus } from 'lucide-react';
 import { Github } from '@/components/GithubIcon';
 import type { Role } from '@nav/shared';
 import { GITHUB_LOGIN_URL } from '@/api/auth';
@@ -10,6 +10,7 @@ import {
   Badge,
   Button,
   buttonClass,
+  ButtonLink,
   CopyButton,
   CopyField,
   ErrorState,
@@ -30,6 +31,8 @@ import {
 import { useWorkspace } from '@/layouts/WorkspaceContext';
 import { cn } from '@/lib/cn';
 import { useTitle } from '@/lib/useTitle';
+import { EditActions, EditLink, Row, Section } from './parts';
+import { LogStreamsSection, LoginSettingsSection, MetricsStreamSection, RegistrySection, WebhooksSection } from './WorkspaceIntegrations';
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'owner', label: 'Owner' },
@@ -45,67 +48,24 @@ const ROLE_HELP: Record<Role, string> = {
   viewer: 'Read-only access. Secrets are masked.',
 };
 
-const SECTIONS = [
+const SECTIONS: { id: string; label: string; admin?: boolean }[] = [
   { id: 'general', label: 'General' },
   { id: 'members', label: 'Team Members' },
+  { id: 'login', label: 'Login Settings', admin: true },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'webhooks', label: 'Webhooks', admin: true },
+  { id: 'log-streams', label: 'Log Streams', admin: true },
+  { id: 'metrics-stream', label: 'Metrics Stream', admin: true },
+  { id: 'registry', label: 'Registry Credentials', admin: true },
   { id: 'integrations', label: 'Integrations' },
-] as const;
+  { id: 'audit', label: 'Audit Logs', admin: true },
+];
 
-/** Bordered settings section with an anchor id. */
-function Section({ id, title, description, children }: { id: string; title: string; description?: ReactNode; children: ReactNode }) {
-  return (
-    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-20 rounded-[3px] border border-border-strong px-5 py-6 md:px-7 md:py-7">
-      <h2 id={`${id}-title`} className="text-[18px] font-semibold text-fg">
-        {title}
-      </h2>
-      {description && <p className="mt-1.5 max-w-2xl text-[13.5px] text-fg-muted">{description}</p>}
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-/** Label column on the left, control on the right. */
-function Row({ label, description, children, htmlFor }: { label: ReactNode; description?: ReactNode; children: ReactNode; htmlFor?: string }) {
-  return (
-    <div className="grid gap-3 py-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:gap-8">
-      <div>
-        {htmlFor ? (
-          <label htmlFor={htmlFor} className="text-[14px] font-semibold text-fg">
-            {label}
-          </label>
-        ) : (
-          <div className="text-[14px] font-semibold text-fg">{label}</div>
-        )}
-        {description && <p className="mt-1 text-[13.5px] text-fg-muted">{description}</p>}
-      </div>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function EditLink({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <div className="mt-2.5 flex justify-end">
-      <button type="button" onClick={onClick} aria-label={label} className="inline-flex items-center gap-1.5 text-[13px] text-fg hover:underline">
-        <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden /> Edit
-      </button>
-    </div>
-  );
-}
-
-function EditActions({ onCancel, loading, disabled }: { onCancel: () => void; loading?: boolean; disabled?: boolean }) {
-  return (
-    <div className="mt-3 flex justify-end gap-2">
-      <Button size="sm" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button size="sm" type="submit" variant="primary" loading={loading} disabled={disabled}>
-        Save changes
-      </Button>
-    </div>
-  );
-}
+const NOTIFY_OPTIONS = [
+  { value: 'all', label: 'All deploy events' },
+  { value: 'failure', label: 'Failures only' },
+  { value: 'none', label: 'Nothing (paused)' },
+];
 
 function GeneralSection() {
   const { ws, workspace, isAdmin } = useWorkspace();
@@ -117,7 +77,7 @@ function GeneralSection() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     try {
-      await update.mutateAsync(name.trim());
+      await update.mutateAsync({ name: name.trim() });
       toast.success('Workspace renamed');
       setEditing(false);
     } catch (err) {
@@ -294,11 +254,13 @@ function NotificationsSection() {
   const toast = useToast();
   const [webhookUrl, setWebhookUrl] = useState('');
   const [notifyOn, setNotifyOn] = useState('failure');
+  const [emailNotifyOn, setEmailNotifyOn] = useState('failure');
   const [editing, setEditing] = useState(false);
   const reset = () => {
     if (settings.data) {
       setWebhookUrl(settings.data.webhookUrl ?? '');
       setNotifyOn(settings.data.notifyOn || 'failure');
+      setEmailNotifyOn(settings.data.emailNotifyOn || 'failure');
     }
   };
   useEffect(reset, [settings.data]);
@@ -314,7 +276,7 @@ function NotificationsSection() {
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              await update.mutateAsync({ webhookUrl: webhookUrl.trim() || null, notifyOn });
+              await update.mutateAsync({ webhookUrl: webhookUrl.trim() || null, notifyOn, emailNotifyOn });
               toast.success('Notification settings saved');
               setEditing(false);
             } catch (err) {
@@ -335,12 +297,11 @@ function NotificationsSection() {
               value={notifyOn}
               disabled={!editing}
               onChange={(e) => setNotifyOn(e.target.value)}
-              options={[
-                { value: 'all', label: 'All deploy events' },
-                { value: 'failure', label: 'Failures only' },
-                { value: 'none', label: 'Nothing (paused)' },
-              ]}
+              options={NOTIFY_OPTIONS}
             />
+          </Row>
+          <Row label="Email members on" description="Deploy emails go to members who kept email notifications on in their account settings.">
+            <Select aria-label="Email members on" value={emailNotifyOn} disabled={!editing} onChange={(e) => setEmailNotifyOn(e.target.value)} options={NOTIFY_OPTIONS} />
             {editing ? (
               <EditActions
                 onCancel={() => {
@@ -356,6 +317,21 @@ function NotificationsSection() {
           </Row>
         </form>
       )}
+    </Section>
+  );
+}
+
+function AuditSection() {
+  const { ws } = useWorkspace();
+  return (
+    <Section id="audit" title="Audit Logs" description="Every change made in this workspace through the dashboard, CLI or API: who, what, when and from where.">
+      <Row label="Workspace audit log" description="Filter by action or member and export what you need.">
+        <div className="flex justify-end">
+          <ButtonLink to={`/w/${ws}/audit-logs`} icon={<FileClock className="size-4" />}>
+            View audit logs
+          </ButtonLink>
+        </div>
+      </Row>
     </Section>
   );
 }
@@ -407,8 +383,8 @@ function IntegrationsSection() {
 }
 
 /** Highlights the section currently in view. */
-function useActiveSection(): string {
-  const [active, setActive] = useState<string>(SECTIONS[0].id);
+function useActiveSection(sections: { id: string }[]): string {
+  const [active, setActive] = useState<string>(sections[0].id);
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     const obs = new IntersectionObserver(
@@ -418,20 +394,21 @@ function useActiveSection(): string {
       },
       { rootMargin: '-60px 0px -55% 0px' },
     );
-    for (const s of SECTIONS) {
+    for (const s of sections) {
       const el = document.getElementById(s.id);
       if (el) obs.observe(el);
     }
     return () => obs.disconnect();
-  }, []);
+  }, [sections]);
   return active;
 }
 
 export function WorkspaceSettingsPage() {
   useTitle('Settings');
-  const { workspace } = useWorkspace();
+  const { workspace, isAdmin } = useWorkspace();
   const { hash } = useLocation();
-  const active = useActiveSection();
+  const sections = useMemo(() => SECTIONS.filter((s) => !s.admin || isAdmin), [isAdmin]);
+  const active = useActiveSection(sections);
 
   useEffect(() => {
     if (!hash) return;
@@ -457,12 +434,22 @@ export function WorkspaceSettingsPage() {
         <div className="min-w-0 space-y-8">
           <GeneralSection />
           <MembersSection />
+          {isAdmin && <LoginSettingsSection />}
           <NotificationsSection />
+          {isAdmin && (
+            <>
+              <WebhooksSection />
+              <LogStreamsSection />
+              <MetricsStreamSection />
+              <RegistrySection />
+            </>
+          )}
           <IntegrationsSection />
+          {isAdmin && <AuditSection />}
         </div>
         <nav aria-label="Settings sections" className="hidden lg:block">
           <ul className="sticky top-[86px] space-y-1 border-l border-border-strong pl-4">
-            {SECTIONS.map((s) => (
+            {sections.map((s) => (
               <li key={s.id}>
                 <a
                   href={`#${s.id}`}

@@ -13,7 +13,8 @@ export type PageKind =
   | 'headers_too_large'
   | 'method_not_allowed'
   | 'static_not_found'
-  | 'range_not_satisfiable';
+  | 'range_not_satisfiable'
+  | 'ip_blocked';
 
 interface PageDef { status: number; code: string; title: string; message: string }
 
@@ -27,6 +28,7 @@ export const PAGES: Record<PageKind, PageDef> = {
   bad_request: { status: 400, code: 'bad_request', title: 'Bad request', message: 'The request could not be understood by the edge.' },
   uri_too_long: { status: 414, code: 'uri_too_long', title: 'URI too long', message: 'The request URL exceeds the maximum allowed length.' },
   headers_too_large: { status: 431, code: 'headers_too_large', title: 'Request headers too large', message: 'The request headers exceed the maximum allowed size.' },
+  ip_blocked: { status: 403, code: 'ip_not_allowed', title: 'Access denied', message: 'This service only accepts requests from approved IP addresses.' },
   method_not_allowed: { status: 405, code: 'method_not_allowed', title: 'Method not allowed', message: 'Static sites only accept GET and HEAD requests.' },
   static_not_found: { status: 404, code: 'not_found', title: 'Page not found', message: 'The page you are looking for does not exist.' },
   range_not_satisfiable: { status: 416, code: 'range_not_satisfiable', title: 'Range not satisfiable', message: 'The requested byte range is outside the file.' },

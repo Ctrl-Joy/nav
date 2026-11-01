@@ -60,7 +60,7 @@ export function CommandPalette({ ws, open, onClose, canWrite }: { ws: string; op
     const go = (to: string) => () => navigate(to);
     const out: PaletteItem[] = [];
     if (canWrite) {
-      const kinds: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static', 'postgres', 'blueprint'];
+      const kinds: ResourceKind[] = ['web', 'private', 'worker', 'cron', 'static', 'postgres', 'keyvalue', 'blueprint'];
       for (const k of kinds) {
         const Icon = RESOURCE_META[k].icon;
         out.push({ id: `new-${k}`, group: 'Actions', label: `New ${RESOURCE_META[k].label}`, icon: <Icon className="size-4" />, run: go(newResourcePath(ws, k)), keywords: 'create add' });

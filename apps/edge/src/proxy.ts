@@ -8,6 +8,8 @@ import type { Duplex } from 'node:stream';
 import { rawPage, sendPage, type PageKind } from './pages.ts';
 import { sanitizeHost, type Route, type RouteTable, type Upstream } from './routes.ts';
 import { serveStatic } from './static.ts';
+import { ipAllowed } from './access.ts';
+import { EdgeCache, MAX_BODY, freshFor } from './cache.ts';
 import type { Metrics } from './metrics.ts';
 
 export const HOP_BY_HOP = new Set([
@@ -154,12 +156,16 @@ interface ForwardTarget {
   hostHeader?: string;
   label: string;
   agent: http.Agent;
+  /** Set when the response may be stored in the edge cache under this key. */
+  cache?: { key: string; serviceId: string; maxTtlSeconds: number };
 }
 
 // --- Edge ---------------------------------------------------------------------------------------
 
 export class Edge {
   readonly table: RouteTable;
+  readonly cache = new EdgeCache();
+  private cacheVersions = new Map<string, string>();
   readonly balancer: Balancer;
   private opts: Required<Omit<EdgeOptions, 'metrics' | 'acmeLookup' | 'hasCert' | 'table'>> & EdgeOptions;
   private agents = new Map<string, http.Agent>();
@@ -300,6 +306,7 @@ export class Edge {
     }
     if (route.suspended) { this.page(req, res, rc, 'suspended'); return; }
     if (route.maintenanceMode) { this.page(req, res, rc, 'maintenance'); return; }
+    if (!ipAllowed(req.socket.remoteAddress, route.ipRules)) { this.page(req, res, rc, 'ip_blocked'); return; }
 
     if (route.type === 'static') {
       res.setHeader('x-request-id', rc.requestId);
@@ -337,7 +344,26 @@ export class Edge {
     res.end(req.method === 'HEAD' ? undefined : value);
   }
 
+  /** Serves a cached response if there is a fresh one; returns the cache target for a miss, or null. */
+  private fromCache(req: http.IncomingMessage, res: http.ServerResponse, route: Route, rc: RequestCtx): ForwardTarget['cache'] | 'hit' | null {
+    if (!route.edgeCache.enabled || (req.method !== 'GET' && req.method !== 'HEAD') || req.headers.authorization) return null;
+    // A new deploy or an explicit purge changes the version: drop everything cached for the old one.
+    if (this.cacheVersions.get(route.serviceId) !== route.cacheVersion) {
+      this.cache.purge(route.serviceId);
+      this.cacheVersions.set(route.serviceId, route.cacheVersion);
+    }
+    const key = EdgeCache.key(route.serviceId, rc.host, req.url ?? '/', req.headers['accept-encoding'] as string | undefined);
+    const hit = this.cache.get(key);
+    if (!hit) return { key, serviceId: route.serviceId, maxTtlSeconds: route.edgeCache.maxTtlSeconds };
+    rc.upstream = 'cache';
+    res.writeHead(hit.status, { ...hit.headers, age: String(Math.floor((Date.now() - hit.storedAt) / 1000)), 'x-nav-cache': 'HIT', 'x-request-id': rc.requestId });
+    res.end(req.method === 'HEAD' ? undefined : hit.body);
+    return 'hit';
+  }
+
   private proxyToService(req: http.IncomingMessage, res: http.ServerResponse, route: Route, rc: RequestCtx, attempt: number, avoid?: Upstream): void {
+    const cache = attempt === 0 ? this.fromCache(req, res, route, rc) : null;
+    if (cache === 'hit') return;
     const up = this.balancer.pick(route.serviceId, route.upstreams, avoid);
     if (!up) { this.page(req, res, rc, 'no_upstream'); return; }
     rc.upstream = `${up.host}:${up.port}`;
@@ -346,7 +372,7 @@ export class Edge {
     const canRetry = attempt === 0 && bodyless && IDEMPOTENT.has(req.method ?? '');
     this.forward(req, res, rc, {
       protocol: 'http:', hostname: up.host, port: up.port, path: req.url ?? '/', label: up.id,
-      agent: this.agentFor('http:', up.host, up.port),
+      agent: this.agentFor('http:', up.host, up.port), cache: cache ?? undefined,
     }, (connectErr) => {
       if (connectErr) {
         this.balancer.eject(up);
@@ -403,6 +429,26 @@ export class Edge {
       if (connectTimer) clearTimeout(connectTimer);
       const extra: [string, string][] = [['x-request-id', rc.requestId]];
       if (!this.opts.production) extra.push(['nav-routing', t.label]);
+      const ttl = t.cache && req.method === 'GET' && pres.statusCode === 200 ? freshFor(pres.headers, t.cache.maxTtlSeconds) : 0;
+      if (t.cache) extra.push(['x-nav-cache', ttl > 0 ? 'MISS' : 'BYPASS']);
+      if (ttl > 0 && Number(pres.headers['content-length'] ?? 0) <= MAX_BODY) {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        pres.on('data', (c: Buffer) => { size += c.length; if (size <= MAX_BODY) chunks.push(c); });
+        pres.on('end', () => {
+          if (size > MAX_BODY || !pres.complete) return;
+          const flat = responseHeaders(pres, []);
+          const headers: Record<string, string | string[]> = {};
+          for (let i = 0; i < flat.length; i += 2) {
+            const k = flat[i].toLowerCase();
+            if (k === 'age') continue;
+            const prev = headers[k];
+            headers[k] = prev === undefined ? flat[i + 1] : ([] as string[]).concat(prev, flat[i + 1]);
+          }
+          const now = Date.now();
+          this.cache.set(t.cache!.key, t.cache!.serviceId, { status: 200, headers, body: Buffer.concat(chunks), storedAt: now, expiresAt: now + ttl * 1000 });
+        });
+      }
       const hdrs = responseHeaders(pres, extra);
       const status = pres.statusCode ?? 502;
       try {
@@ -454,6 +500,7 @@ export class Edge {
     rc.serviceId = route.serviceId;
     if (route.suspended) return fail('suspended');
     if (route.maintenanceMode) return fail('maintenance');
+    if (!ipAllowed(req.socket.remoteAddress, route.ipRules)) return fail('ip_blocked');
     if (route.type === 'static') return fail('static_not_found');
     this.upgraded.add(socket);
     socket.once('close', () => this.upgraded.delete(socket));

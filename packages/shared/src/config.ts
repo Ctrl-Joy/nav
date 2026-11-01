@@ -66,6 +66,11 @@ export const config = {
     domains: (process.env.NAV_SSO_DOMAINS ?? '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean),
   },
   logRetentionDays: int('NAV_LOG_RETENTION_DAYS', 7),
+  /** Outgoing mail, e.g. smtps://user:pass@smtp.example.com:465. Unset: messages are written to <dataDir>/outbox. */
+  smtpUrl: process.env.NAV_SMTP_URL ?? '',
+  mailFrom: process.env.NAV_MAIL_FROM ?? 'NAV <no-reply@nav.localhost>',
+  /** Webhooks and log streams may target private addresses (development). Off in production. */
+  allowPrivateTargets: (process.env.NAV_ALLOW_PRIVATE_TARGETS ?? (process.env.NODE_ENV === 'production' ? '0' : '1')) === '1',
 };
 
 export function publicUrlFor(slug: string): string {

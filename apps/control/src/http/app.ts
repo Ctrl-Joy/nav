@@ -16,6 +16,14 @@ import { envGroupRoutes } from './routes/envgroups.ts';
 import { blueprintRoutes } from './routes/blueprints.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
 import { internalRoutes } from './routes/internal.ts';
+import { mfaRoutes } from './routes/mfa.ts';
+import { attachShellRelay } from './shell.ts';
+import { keyValueRoutes } from './routes/keyvalue.ts';
+import { registryRoutes } from './routes/registries.ts';
+import { streamRoutes } from './routes/streams.ts';
+import { snapshotRoutes } from './routes/snapshots.ts';
+import { outboundWebhookRoutes } from './routes/outboundWebhooks.ts';
+import { auditRoutes, recordAudit } from './routes/audit.ts';
 
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
@@ -56,6 +64,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
   });
 
+  app.addHook('onResponse', async (req, reply) => {
+    if (req.user && !SAFE.has(req.method) && reply.statusCode < 400 && req.url.startsWith('/api/v1/')) await recordAudit(req).catch(() => {});
+  });
+
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
       return reply.status(err.status).send({ error: { code: err.code, message: err.message, details: err.details } });
@@ -78,10 +90,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   app.get('/healthz', async () => ({ ok: true }));
+  attachShellRelay(app);
 
   await app.register(
     async (api) => {
       await authRoutes(api);
+      await mfaRoutes(api);
+      await auditRoutes(api);
+      await outboundWebhookRoutes(api);
+      await keyValueRoutes(api);
+      await registryRoutes(api);
+      await streamRoutes(api);
+      await snapshotRoutes(api);
       await workspaceRoutes(api);
       await serviceRoutes(api);
       await databaseRoutes(api);

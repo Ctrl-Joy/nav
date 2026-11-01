@@ -223,6 +223,21 @@ nav db backup main-db`,
     ],
   },
   {
+    slug: 'key-value',
+    group: 'Services',
+    title: 'Key Value',
+    blocks: [
+      {
+        type: 'p',
+        text: 'Key Value instances are managed Redis-compatible stores for caches, queues and sessions. Create one from New → Key Value; pick a plan (its memory is the `maxmemory` limit) and an eviction policy such as `allkeys-lru` for caches or `noeviction` for queues.',
+      },
+      {
+        type: 'p',
+        text: 'Services in the workspace connect with the internal URL over the private network. The external URL is only reachable from addresses in the inbound IP rules; with no rules, external access is off. Connection strings are revealed on the Info tab to developers and admins.',
+      },
+    ],
+  },
+  {
     slug: 'persistent-disks',
     group: 'Services',
     title: 'Persistent disks',
@@ -241,7 +256,7 @@ nav db backup main-db`,
       },
       {
         type: 'p',
-        text: "Disk snapshots are not built yet.",
+        text: "NAV snapshots each disk daily, and you can take a manual snapshot from the service's Disks tab. Restoring a snapshot (admins only) restarts the service and replaces the disk's contents.",
       },
     ],
   },

@@ -7,6 +7,8 @@ import { SERVICE_PLANS } from '@nav/shared';
 import { notify, pool, q } from '../db/pool.ts';
 import { enqueue, recordEvent } from '../lib/core.ts';
 import { markForDeletion } from '../lib/services.ts';
+import { deleteStoredArtifact } from '@nav/shared/artifacts';
+import { snapshotJob } from '../http/routes/snapshots.ts';
 
 async function withLock(key: number, fn: () => Promise<void>): Promise<void> {
   const c = await pool.connect();
@@ -157,6 +159,17 @@ async function dailyTick(): Promise<void> {
     `DELETE FROM db_backups WHERE kind = 'automatic' AND id IN (
        SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY database_id ORDER BY created_at DESC) AS rn FROM db_backups WHERE kind = 'automatic') x WHERE rn > 7)`,
   );
+  // Daily disk snapshots for services with a persistent disk; keep the latest 7 automatic ones.
+  const disks = await q("SELECT s.* FROM services s WHERE s.disk IS NOT NULL AND NOT s.suspended AND s.current_deploy_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM disk_snapshots d WHERE d.service_id = s.id AND d.kind = 'automatic' AND d.created_at > now() - interval '23 hours')");
+  for (const s of disks) {
+    const sid = id('dsn');
+    await q("INSERT INTO disk_snapshots (id, service_id, kind) VALUES ($1,$2,'automatic')", [sid, s.id]);
+    await snapshotJob('disk_snapshot', s, sid);
+  }
+  for (const old of await q("SELECT id, store FROM (SELECT id, store, row_number() OVER (PARTITION BY service_id ORDER BY created_at DESC) AS rn FROM disk_snapshots WHERE kind = 'automatic') x WHERE rn > 7")) {
+    if (old.store?.key) await deleteStoredArtifact(old.store.key);
+    await q('DELETE FROM disk_snapshots WHERE id = $1', [old.id]);
+  }
   const renew = await q("SELECT d.id FROM custom_domains d JOIN certificates c ON c.domain = d.domain WHERE c.not_after < now() + interval '30 days'");
   for (const r of renew) await enqueue('issue_cert', { domainId: r.id }, { maxAttempts: 3 });
   // Re-check unverified domains periodically.

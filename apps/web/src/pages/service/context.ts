@@ -10,3 +10,6 @@ export function useServiceCtx(): ServiceOutletCtx {
 }
 
 export const HAS_URL = (s: Service) => s.type === 'web' || s.type === 'static';
+
+/** Service types with long-running instances you can open a shell in. */
+export const SHELL_TYPES: Service['type'][] = ['web', 'private', 'worker'];

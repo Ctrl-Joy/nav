@@ -13,10 +13,18 @@ import { localize, publish, removeLocal, retire } from './artifacts.ts';
 import { activeInstances, describePlacement, place, startInstances, stopInstances, waitInstances } from './cluster.ts';
 import { detect } from './detect.ts';
 import { HEALTH_TIMEOUT_MS, type Entry, type InstanceManager } from './instances.ts';
-import type { Artifact, Driver } from './runtime/types.ts';
+import type { Artifact, Driver, RegistryAuth } from './runtime/types.ts';
+import { decrypt } from '@nav/shared/crypto';
 import { flushLogs, shipLog, sleep } from './util.ts';
 
 export interface Ctx { driver: Driver; instances: InstanceManager; nodeId: string }
+
+/** Credentials for pulling from a private registry, decrypted only on the node that pulls. */
+export async function registryAuth(credentialId: string | null | undefined): Promise<RegistryAuth | undefined> {
+  if (!credentialId) return undefined;
+  const c = await one('SELECT registry, username, password_enc FROM registry_credentials WHERE id = $1', [credentialId]);
+  return c ? { serveraddress: c.registry, username: c.username, password: decrypt(c.password_enc) } : undefined;
+}
 
 const ACTIVE = ['queued', 'build_in_progress', 'pre_deploy_in_progress', 'update_in_progress'];
 const KEEP_ARTIFACTS = 5;
@@ -109,7 +117,7 @@ export async function handleDeploy(ctx: Ctx, payload: { deployId: string; servic
     } else if (svc.runtime === 'image') {
       const imageUrl = deploy.config?.imageUrl ?? svc.image_url;
       if (!ctx.driver.pullImage) throw new DeployError('build_failed', 'image-backed services require the docker driver (NAV_DRIVER=docker)');
-      artifact = await ctx.driver.pullImage(imageUrl, log);
+      artifact = { ...(await ctx.driver.pullImage(imageUrl, log, await registryAuth(svc.registry_credential_id))), registryCredentialId: svc.registry_credential_id ?? undefined };
     } else {
       const buildDir = path.join(config.dataDir, 'builds', deploy.id);
       const [sha, subject, author] = (await checkout(svc, deploy, buildDir, log)).split('\0');
@@ -350,9 +358,11 @@ export async function handleInstanceStart(ctx: Ctx, payload: { instanceId: strin
   await ctx.instances.stop(entry, 2000);
 }
 
-export async function handleInstanceStop(ctx: Ctx, payload: { instanceId: string; graceMs?: number }): Promise<void> {
+export async function handleInstanceStop(ctx: Ctx, payload: { instanceId: string; graceMs?: number | null }): Promise<void> {
   const entry = ctx.instances.entries.get(payload.instanceId);
-  if (entry) return ctx.instances.stop(entry, payload.graceMs ?? 30_000);
+  // Default: the service's graceful shutdown delay (SIGTERM, then SIGKILL after it).
+  const delay = payload.graceMs ?? ((await one('SELECT shutdown_delay_s FROM services WHERE id = $1', [entry?.serviceId]))?.shutdown_delay_s ?? 30) * 1000;
+  if (entry) return ctx.instances.stop(entry, delay);
   await q("UPDATE instances SET status = 'stopped', stopped_at = now() WHERE id = $1 AND node_id = $2 AND status NOT IN ('stopped','lost')", [payload.instanceId, ctx.nodeId]);
   await notify('nav_routes');
 }

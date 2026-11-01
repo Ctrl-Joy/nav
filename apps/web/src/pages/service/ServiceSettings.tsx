@@ -1,19 +1,34 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, RotateCw, Trash2 } from 'lucide-react';
+import { Eraser, Plus, RotateCw, Trash2 } from 'lucide-react';
 import type { Runtime, Service, StaticHeader, StaticRoute, UpdateServiceInput } from '@nav/shared';
-import { useDeleteService, useRotateDeployHook, useUpdateService } from '@/api/services';
+import { useLogStreams, useRegistryCredentials } from '@/api/integrations';
+import {
+  useDeleteService,
+  useDeleteServiceLogStream,
+  usePurgeCache,
+  useRotateDeployHook,
+  useSaveServiceLogStream,
+  useServiceLogStream,
+  useUpdateService,
+  type ServiceUpdate,
+} from '@/api/services';
 import { useBranches } from '@/api/workspaces';
+import { IpRulesEditor, normalizeRules, rulesValid, type IpRule } from '@/components/IpRulesEditor';
+import { LogStreamFields, logStreamDirty, logStreamDraft, logStreamEndpointError, logStreamInput } from '@/components/LogStreamFields';
 import {
   Button,
   Card,
+  CardBody,
   CardFooter,
   CardHeader,
+  ErrorState,
   IconButton,
   Input,
   SecretValue,
   Select,
   SettingRow,
+  SkeletonRows,
   Switch,
   Textarea,
   useConfirm,
@@ -94,7 +109,7 @@ function useSave(service: Service) {
   const toast = useToast();
   return {
     pending: update.isPending,
-    save: async (input: UpdateServiceInput, msg = 'Settings saved') => {
+    save: async (input: ServiceUpdate, msg = 'Settings saved') => {
       if (!Object.keys(input).length) return true;
       try {
         await update.mutateAsync(input);
@@ -407,6 +422,244 @@ function OperationsCard({ service }: { service: Service }) {
   );
 }
 
+function InboundRulesCard({ service }: { service: Service }) {
+  const { canWrite } = useWorkspace();
+  const [rows, setRows] = useState<IpRule[]>(service.ipAllowList);
+  useEffect(() => setRows(service.ipAllowList), [service.ipAllowList]);
+  const { save, pending } = useSave(service);
+  const dirty = JSON.stringify(rows) !== JSON.stringify(service.ipAllowList);
+  return (
+    <Card>
+      <CardHeader title="Inbound IP rules" description="Only requests from these sources reach the service through its public URL and custom domains. Others get a 403." />
+      <CardBody>
+        <IpRulesEditor
+          rows={rows}
+          onChange={setRows}
+          disabled={!canWrite}
+          emptyText="No rules. Requests from everywhere are allowed."
+          footnote="An empty list allows everyone. Traffic from the workspace private network is never filtered."
+        />
+      </CardBody>
+      {canWrite && (
+        <SectionFooter
+          dirty={dirty}
+          pending={pending}
+          onSave={() => rulesValid(rows) && save({ ipAllowList: normalizeRules(rows) }, 'Inbound IP rules saved')}
+          onReset={() => setRows(service.ipAllowList)}
+          note={dirty && !rulesValid(rows) ? 'Fix the invalid rules to save' : undefined}
+        />
+      )}
+    </Card>
+  );
+}
+
+function EdgeCacheCard({ service }: { service: Service }) {
+  const { canWrite } = useWorkspace();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const purge = usePurgeCache(service.id);
+  const [enabled, setEnabled] = useState(service.edgeCache.enabled);
+  const [ttl, setTtl] = useState(service.edgeCache.maxTtlSeconds ?? 86_400);
+  useEffect(() => {
+    setEnabled(service.edgeCache.enabled);
+    setTtl(service.edgeCache.maxTtlSeconds ?? 86_400);
+  }, [service.edgeCache]);
+  const { save, pending } = useSave(service);
+  const dirty = enabled !== service.edgeCache.enabled || ttl !== (service.edgeCache.maxTtlSeconds ?? 86_400);
+  const ttlInvalid = !Number.isInteger(ttl) || ttl < 1 || ttl > 31_536_000;
+  return (
+    <Card>
+      <CardHeader title="Edge caching" description="Cache responses at the NAV edge when your app sends Cache-Control headers that allow it (public, max-age / s-maxage)." />
+      <SettingRow title="Cache responses" description="Serve cacheable responses from the edge instead of your instances.">
+        <Switch checked={enabled} onChange={setEnabled} disabled={!canWrite} label={enabled ? 'Enabled' : 'Disabled'} />
+      </SettingRow>
+      <SettingRow title="Maximum TTL" description="Upper bound on how long a response stays cached, whatever its headers say.">
+        <div className="flex items-center gap-2">
+          <Input type="number" min={1} max={31_536_000} className="w-36" value={ttl} onChange={(e) => setTtl(Number(e.target.value))} disabled={!canWrite || !enabled} aria-label="Maximum TTL in seconds" aria-invalid={ttlInvalid} />
+          <span className="text-[13px] text-fg-muted">seconds{Number.isInteger(ttl) && ttl >= 3600 ? ` (${+(ttl / 3600).toFixed(1)} h)` : ''}</span>
+        </div>
+      </SettingRow>
+      {canWrite && (
+        <SettingRow title="Purge cache" description="Drop every cached response for this service now.">
+          <Button
+            icon={<Eraser className="size-3.5" />}
+            loading={purge.isPending}
+            disabled={!service.edgeCache.enabled}
+            onClick={async () => {
+              if (!(await confirm({ title: 'Purge the edge cache?', body: 'The next requests go to your service until responses are cached again.', confirmText: 'Purge cache' }))) return;
+              try {
+                await purge.mutateAsync();
+                toast.success('Edge cache purged');
+              } catch (e) {
+                toast.fromError(e, 'Could not purge cache');
+              }
+            }}
+          >
+            Purge cache
+          </Button>
+        </SettingRow>
+      )}
+      {canWrite && (
+        <SectionFooter
+          dirty={dirty && !ttlInvalid}
+          pending={pending}
+          onSave={() => save({ edgeCache: { enabled, maxTtlSeconds: ttl } }, 'Edge caching saved')}
+          onReset={() => {
+            setEnabled(service.edgeCache.enabled);
+            setTtl(service.edgeCache.maxTtlSeconds ?? 86_400);
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+function RuntimeCard({ service }: { service: Service }) {
+  const { ws, canWrite } = useWorkspace();
+  const isImage = service.runtime === 'image';
+  const creds = useRegistryCredentials(ws, isImage && canWrite);
+  const [delay, setDelay] = useState(service.shutdownDelaySeconds);
+  const [cred, setCred] = useState(service.registryCredentialId ?? '');
+  useEffect(() => setDelay(service.shutdownDelaySeconds), [service.shutdownDelaySeconds]);
+  useEffect(() => setCred(service.registryCredentialId ?? ''), [service.registryCredentialId]);
+  const { save, pending } = useSave(service);
+  const delayInvalid = !Number.isInteger(delay) || delay < 1 || delay > 300;
+  const changes: ServiceUpdate = {};
+  if (delay !== service.shutdownDelaySeconds) changes.shutdownDelaySeconds = delay;
+  if (isImage && cred !== (service.registryCredentialId ?? '')) changes.registryCredentialId = cred || null;
+  const dirty = Object.keys(changes).length > 0;
+  return (
+    <Card>
+      <CardHeader title="Runtime" description="Changes apply on the next deploy." />
+      {service.type !== 'cron' && (
+        <SettingRow
+          title="Graceful shutdown delay"
+          description="How long an old instance gets after SIGTERM to finish in-flight work before it is killed (1–300 seconds)."
+        >
+          <div className="flex items-center gap-2">
+            <Input type="number" min={1} max={300} className="w-28" value={delay} onChange={(e) => setDelay(Number(e.target.value))} disabled={!canWrite} aria-label="Shutdown delay in seconds" aria-invalid={delayInvalid} />
+            <span className="text-[13px] text-fg-muted">seconds</span>
+          </div>
+          {delayInvalid && <p className="mt-1 text-xs text-danger">Between 1 and 300 seconds.</p>}
+        </SettingRow>
+      )}
+      {isImage && (
+        <SettingRow title="Registry credential" description="Used to pull the image from a private registry. Manage credentials in workspace settings.">
+          {creds.isError ? (
+            <p className="text-xs text-danger">Could not load registry credentials.</p>
+          ) : (
+            <Select
+              value={cred}
+              onChange={(e) => setCred(e.target.value)}
+              placeholder="None (public image)"
+              options={(creds.data?.items ?? []).map((c) => ({ value: c.id, label: `${c.name} · ${c.registry}` }))}
+              disabled={!canWrite}
+              aria-label="Registry credential"
+            />
+          )}
+        </SettingRow>
+      )}
+      {canWrite && (
+        <SectionFooter
+          dirty={dirty && !delayInvalid}
+          pending={pending}
+          onSave={() => save(changes)}
+          onReset={() => {
+            setDelay(service.shutdownDelaySeconds);
+            setCred(service.registryCredentialId ?? '');
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+type StreamMode = 'default' | 'custom' | 'off';
+
+/** Per-service log stream: inherit the workspace default, send elsewhere, or opt out. Admins only. */
+function LogStreamCard({ service }: { service: Service }) {
+  const { ws } = useWorkspace();
+  const override = useServiceLogStream(service.id);
+  const workspace = useLogStreams(ws);
+  const saveStream = useSaveServiceLogStream(service.id);
+  const del = useDeleteServiceLogStream(service.id);
+  const toast = useToast();
+  const current = override.data?.override ?? null;
+  const serverMode: StreamMode = !current ? 'default' : current.enabled ? 'custom' : 'off';
+  const [mode, setMode] = useState<StreamMode>(serverMode);
+  const [draft, setDraft] = useState(() => logStreamDraft(current));
+  useEffect(() => {
+    setMode(serverMode);
+    setDraft(logStreamDraft(current?.enabled ? current : null));
+  }, [current, serverMode]);
+  const fallback = workspace.data?.default ?? null;
+
+  const dirty = mode !== serverMode || (mode === 'custom' && logStreamDirty({ ...draft, enabled: true }, current));
+  const invalid = mode === 'custom' && (!draft.endpoint.trim() || !!logStreamEndpointError(draft));
+  // Opting out still stores a (disabled) destination: reuse this service's or the workspace's.
+  const optOutTarget = current ?? fallback;
+
+  const onSave = async () => {
+    try {
+      if (mode === 'default') await del.mutateAsync();
+      else if (mode === 'custom') await saveStream.mutateAsync({ ...logStreamInput(draft), enabled: true });
+      else if (optOutTarget) await saveStream.mutateAsync({ protocol: optOutTarget.protocol, endpoint: optOutTarget.endpoint, enabled: false });
+      toast.success('Log stream saved');
+    } catch (e) {
+      toast.fromError(e, 'Could not save log stream');
+    }
+  };
+
+  return (
+    <Card>
+      <div id="log-stream" className="scroll-mt-24" />
+      <CardHeader title="Log stream" description="Where this service's runtime logs are forwarded." />
+      {override.isPending ? (
+        <CardBody>
+          <SkeletonRows rows={2} />
+        </CardBody>
+      ) : override.isError ? (
+        <CardBody>
+          <ErrorState error={override.error} onRetry={() => override.refetch()} />
+        </CardBody>
+      ) : (
+        <>
+          <SettingRow
+            title="Destination"
+            description={fallback ? <>Workspace default: <span className="font-mono">{fallback.endpoint}</span></> : 'This workspace has no default log stream.'}
+          >
+            <Select
+              value={mode}
+              onChange={(e) => setMode(e.target.value as StreamMode)}
+              aria-label="Log stream destination"
+              options={[
+                { value: 'default', label: 'Use the workspace default' },
+                { value: 'custom', label: 'Send to a different destination' },
+                { value: 'off', label: "Don't stream this service's logs", disabled: !optOutTarget },
+              ]}
+            />
+            {current?.lastError && <p className="mt-2 font-mono text-xs break-all text-danger">{current.lastError}</p>}
+          </SettingRow>
+          {mode === 'custom' && (
+            <CardBody className="border-b border-border">
+              <LogStreamFields draft={{ ...draft, enabled: true }} onChange={(d) => setDraft({ ...d, enabled: true })} hasToken={!!current?.hasToken && current.enabled} />
+            </CardBody>
+          )}
+          <SectionFooter
+            dirty={dirty && !invalid}
+            pending={saveStream.isPending || del.isPending}
+            onSave={onSave}
+            onReset={() => {
+              setMode(serverMode);
+              setDraft(logStreamDraft(current?.enabled ? current : null));
+            }}
+          />
+        </>
+      )}
+    </Card>
+  );
+}
+
 function DangerCard({ service }: { service: Service }) {
   const { ws } = useWorkspace();
   const del = useDeleteService(ws);
@@ -449,7 +702,11 @@ export function ServiceSettingsTab() {
       <BuildCard service={service} />
       {(service.type === 'web' || service.type === 'static') && <CustomDomainsCard service={service} />}
       {service.type === 'static' && <StaticCard service={service} />}
+      {(service.type === 'web' || service.type === 'static') && <InboundRulesCard service={service} />}
+      {service.type === 'web' && <EdgeCacheCard service={service} />}
+      {((service.type !== 'static' && service.type !== 'cron') || service.runtime === 'image') && <RuntimeCard service={service} />}
       <OperationsCard service={service} />
+      {isAdmin && service.type !== 'static' && <LogStreamCard service={service} />}
       {isAdmin && <DangerCard service={service} />}
     </div>
   );

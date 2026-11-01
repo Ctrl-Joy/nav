@@ -22,7 +22,7 @@ import {
 import { useWorkspace } from '@/layouts/WorkspaceContext';
 import { hostnameOf, repoSlug } from '@/lib/format';
 import { useTitle } from '@/lib/useTitle';
-import { HAS_URL, type ServiceOutletCtx } from './context';
+import { HAS_URL, SHELL_TYPES, type ServiceOutletCtx } from './context';
 
 export function ServiceLayout() {
   const { serviceId = '' } = useParams();
@@ -118,6 +118,8 @@ export function ServiceLayout() {
     { to: `${base}/scaling`, label: 'Scaling' },
     ...(HAS_URL(service) ? [{ to: `${base}/previews`, label: 'Previews' }] : []),
     { to: `${base}/jobs`, label: service.type === 'cron' ? 'Runs' : 'Jobs' },
+    ...(SHELL_TYPES.includes(service.type) && canWrite ? [{ to: `${base}/shell`, label: 'Shell' }] : []),
+    ...(service.disk ? [{ to: `${base}/disks`, label: 'Disks' }] : []),
     { to: `${base}/settings`, label: 'Settings' },
   ];
   const ctx: ServiceOutletCtx = { service };

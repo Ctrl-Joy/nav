@@ -17,7 +17,7 @@ export default defineConfig({
       '/api': {
         target: CONTROL_URL,
         changeOrigin: false,
-        ws: false,
+        ws: true, // instance shells
         // Keep Server-Sent Events flowing: never buffer or compress event streams.
         configure(proxy) {
           proxy.on('proxyReq', (proxyReq, req) => {

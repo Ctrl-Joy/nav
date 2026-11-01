@@ -8,8 +8,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { config } from '@nav/shared/config';
 import { publishDir } from '../detect.ts';
+import { spawn } from 'node:child_process';
 import { baseEnv, freePort, isWin, killTree, pipeLines, runShell, spawnShell } from '../util.ts';
-import type { Artifact, BuildContext, Driver, Handle, StartSpec, Usage } from './types.ts';
+import type { Artifact, BuildContext, Driver, ExecSession, Handle, StartSpec, Usage } from './types.ts';
 
 const execFileP = promisify(execFile);
 const dirs = {
@@ -122,6 +123,27 @@ export function processDriver(): Driver {
     },
 
     usage: sampleProcessTrees,
+
+    async exec(_ref, opts) {
+      // No PTY without native modules: an interactive shell over pipes, in the build directory, with the
+      // instance's environment. Good enough for inspecting files and running commands in development.
+      const child = isWin
+        ? spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', '-'], { cwd: opts.cwd ?? undefined, env: opts.env, windowsHide: true })
+        : spawn('/bin/sh', ['-i'], { cwd: opts.cwd ?? undefined, env: { ...opts.env, TERM: 'dumb', PS1: '$ ' }, detached: true });
+      const exited = new Promise<number>((resolve) => {
+        child.on('error', () => resolve(127));
+        child.on('exit', (code) => resolve(code ?? 0));
+      });
+      const session: ExecSession = {
+        tty: false,
+        write: (d) => { if (!child.stdin!.destroyed) child.stdin!.write(d); },
+        resize: () => {},
+        onData: (cb) => { child.stdout!.on('data', cb); child.stderr!.on('data', cb); },
+        exited,
+        kill: () => killTree(child.pid, true),
+      };
+      return session;
+    },
 
     async removeArtifact(artifact) {
       if (artifact.kind === 'dir' && artifact.root.startsWith(dirs.artifacts)) await rm(artifact.root, { recursive: true, force: true }).catch(() => {});

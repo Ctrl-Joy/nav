@@ -1,8 +1,8 @@
-import { Boxes, Clock, Cog, Database, FileStack, Globe, Layers, Lock, type LucideIcon } from 'lucide-react';
+import { Boxes, Clock, Cog, Database, DatabaseZap, FileStack, Globe, Layers, Lock, type LucideIcon } from 'lucide-react';
 import type { ServiceType } from '@nav/shared';
 import { cn } from '@/lib/cn';
 
-export type ResourceKind = ServiceType | 'postgres' | 'blueprint' | 'env_group';
+export type ResourceKind = ServiceType | 'postgres' | 'keyvalue' | 'blueprint' | 'env_group';
 
 export const RESOURCE_META: Record<ResourceKind, { label: string; icon: LucideIcon; description: string }> = {
   web: { label: 'Web Service', icon: Globe, description: 'Public HTTP app with a URL, TLS and zero-downtime deploys.' },
@@ -11,6 +11,7 @@ export const RESOURCE_META: Record<ResourceKind, { label: string; icon: LucideIc
   cron: { label: 'Cron Job', icon: Clock, description: 'Run a command on a schedule.' },
   static: { label: 'Static Site', icon: Layers, description: 'Build once, serve from the edge with custom headers & rewrites.' },
   postgres: { label: 'Postgres', icon: Database, description: 'Managed PostgreSQL with backups and a query console.' },
+  keyvalue: { label: 'Key Value', icon: DatabaseZap, description: 'Managed Redis-compatible store for caches, queues and sessions.' },
   blueprint: { label: 'Blueprint', icon: FileStack, description: 'Infrastructure as code from a nav.yaml file.' },
   env_group: { label: 'Env Group', icon: Boxes, description: 'Shared environment variables.' },
 };

@@ -13,6 +13,9 @@ import { handleDbBackup, handleDbDelete, handleDbProvision, handleDbReconfigure,
 import { handleBlueprintSync, handleDeleteService, handleDeploy, handleInstanceStart, handleInstanceStop, handleNodeCleanup, handleRestart, handleRun, handleScale, handleStop, type Ctx } from './handlers.ts';
 import { CONTROL_JOBS } from '../scheduler/jobs.ts';
 import { liveNodes } from './cluster.ts';
+import { startShellServer } from './shell.ts';
+import { handleDiskRestore, handleDiskSnapshot } from './snapshots.ts';
+import { handleKvDelete, handleKvProvision, handleKvReconfigure, handleKvResume, handleKvSuspend, recoverKeyValues } from './keyvalue.ts';
 import { InstanceManager } from './instances.ts';
 import { dockerAvailable, dockerDriver } from './runtime/docker.ts';
 import { processDriver } from './runtime/process.ts';
@@ -70,6 +73,13 @@ const HANDLERS: Record<string, Handler> = {
   db_delete: handleDbDelete,
   db_backup: handleDbBackup,
   db_restore: handleDbRestore,
+  disk_snapshot: handleDiskSnapshot,
+  disk_restore: handleDiskRestore,
+  kv_provision: handleKvProvision,
+  kv_reconfigure: handleKvReconfigure,
+  kv_suspend: handleKvSuspend,
+  kv_resume: handleKvResume,
+  kv_delete: handleKvDelete,
 };
 
 /**
@@ -88,6 +98,7 @@ async function claim(nid: string, nodeLane: boolean, draining: boolean): Promise
          SELECT j.id FROM jobs j WHERE j.status = 'queued' AND j.run_at <= now()
            AND (j.kind = ANY($2)) = $3 AND NOT (j.kind = ANY($5))
            AND (j.node_id = $1 OR (j.node_id IS NULL AND NOT $4))
+           AND NOT (j.kind LIKE 'kv\\_%' AND EXISTS (SELECT 1 FROM key_values k WHERE k.id = j.payload->>'keyValueId' AND k.node_id IS NOT NULL AND k.node_id <> $1))
            AND NOT (j.kind LIKE 'db\\_%' AND EXISTS (SELECT 1 FROM databases d WHERE d.id = j.payload->>'databaseId' AND d.node_id IS NOT NULL AND d.node_id <> $1))
            AND (j.concurrency_key IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.status = 'running' AND r.concurrency_key = j.concurrency_key))
          ORDER BY j.id FOR UPDATE SKIP LOCKED LIMIT 1)
@@ -111,12 +122,13 @@ async function main() {
   const instances = new InstanceManager(driver, nid);
   const ctx: Ctx = { driver, instances, nodeId: nid };
   process.env.NAV_ACTIVE_DRIVER = driver.name;
+  const shellPort = await startShellServer(ctx);
 
   await q(
-    `INSERT INTO nodes (id, hostname, driver, address, capacity, version, last_heartbeat) VALUES ($1,$2,$3,$4,$5,$6,now())
+    `INSERT INTO nodes (id, hostname, driver, address, capacity, version, agent_port, last_heartbeat) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
      ON CONFLICT (id) DO UPDATE SET hostname = EXCLUDED.hostname, driver = EXCLUDED.driver, address = EXCLUDED.address,
-       capacity = EXCLUDED.capacity, version = EXCLUDED.version, last_heartbeat = now()`,
-    [nid, os.hostname(), driver.name, config.nodeAddress, { cpus: os.cpus().length, memoryMB: Math.round(os.totalmem() / 1048576) }, VERSION],
+       capacity = EXCLUDED.capacity, version = EXCLUDED.version, agent_port = EXCLUDED.agent_port, last_heartbeat = now()`,
+    [nid, os.hostname(), driver.name, config.nodeAddress, { cpus: os.cpus().length, memoryMB: Math.round(os.totalmem() / 1048576) }, VERSION, shellPort],
   );
   console.log(`[agent] node ${nid} (${os.hostname()}, ${config.nodeAddress}) using the ${driver.name} driver`);
 
@@ -145,6 +157,7 @@ async function main() {
   await q("UPDATE runs SET status = 'failed', finished_at = now() WHERE id IN (SELECT payload->>'runId' FROM jobs WHERE kind = 'run' AND status = 'running' AND locked_by = $1)", [nid]);
   await q("UPDATE jobs SET status = CASE WHEN attempts < max_attempts AND kind NOT IN ('deploy','run') THEN 'queued' ELSE 'failed' END, locked_by = NULL, error = 'agent restarted' WHERE status = 'running' AND locked_by = $1", [nid]);
   await recoverDatabases(ctx);
+  await recoverKeyValues(ctx).catch((e) => console.error('[agent] key value recovery', e.message));
   // Process instances do not survive an agent restart: let the cluster bring their services back to size.
   for (const r of await q("SELECT DISTINCT service_id FROM instances WHERE node_id = $1 AND stopped_at > now() - interval '1 minute'", [nid])) {
     await enqueue('scale', { serviceId: r.service_id }, { concurrencyKey: `svc:${r.service_id}` });

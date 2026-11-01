@@ -7,7 +7,7 @@ import Docker from 'dockerode';
 import tar from 'tar-stream';
 import { config } from '@nav/shared/config';
 import { pipeLines } from '../util.ts';
-import type { Artifact, BuildContext, Driver, Handle, StartSpec, Usage } from './types.ts';
+import type { Artifact, BuildContext, Driver, ExecSession, Handle, StartSpec, Usage } from './types.ts';
 
 export const DEFAULT_CONTAINER_PORT = 10000;
 
@@ -211,9 +211,9 @@ export function dockerDriver(): Driver {
       return { kind: 'image', ref: tag, startCommand: detected.runtime === 'docker' ? svc.start_command : null };
     },
 
-    async pullImage(imageUrl, log) {
-      log(`==> Pulling image ${imageUrl}`);
-      const stream = await docker.pull(imageUrl);
+    async pullImage(imageUrl, log, auth) {
+      log(`==> Pulling image ${imageUrl}${auth ? ` (authenticated to ${auth.serveraddress})` : ''}`);
+      const stream = await docker.pull(imageUrl, auth ? { authconfig: auth } : {});
       await followProgress(docker, stream, log);
       return { kind: 'image', ref: imageUrl, startCommand: null };
     },
@@ -289,6 +289,28 @@ export function dockerDriver(): Driver {
 
     async removeArtifact(artifact: Artifact) {
       if (artifact.kind === 'image' && artifact.ref.startsWith('nav/')) await docker.getImage(artifact.ref).remove({ force: true }).catch(() => {});
+    },
+
+    async exec(ref, opts) {
+      // A real TTY: bash when the image has it, otherwise sh. Runs as the container's user with its limits.
+      const exec = await docker.getContainer(ref).exec({
+        Cmd: ['/bin/sh', '-c', 'if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi'],
+        AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true,
+        Env: ['TERM=xterm-256color', `COLUMNS=${opts.cols}`, `LINES=${opts.rows}`],
+        WorkingDir: opts.cwd ?? undefined,
+      });
+      const stream = await exec.start({ hijack: true, stdin: true, Tty: true } as Docker.ExecStartOptions) as unknown as import('node:stream').Duplex;
+      await exec.resize({ h: opts.rows, w: opts.cols }).catch(() => {});
+      const exited = new Promise<number>((resolve) => stream.on('close', async () => resolve((await exec.inspect().catch(() => null))?.ExitCode ?? 0)));
+      const session: ExecSession = {
+        tty: true,
+        write: (d) => stream.write(d),
+        resize: (cols, rows) => void exec.resize({ h: rows, w: cols }).catch(() => {}),
+        onData: (cb) => stream.on('data', cb),
+        exited,
+        kill: () => stream.destroy(),
+      };
+      return session;
     },
 
     async hasImage(ref) {

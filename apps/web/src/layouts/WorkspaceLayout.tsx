@@ -8,8 +8,10 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Database,
+  DatabaseZap,
   FileStack,
   FolderKanban,
+  FileClock,
   Globe,
   KeyRound,
   LayoutGrid,
@@ -23,12 +25,14 @@ import {
   Rocket,
   Search,
   Settings,
+  ShieldAlert,
   UserRound,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { useConfig, useLogout, useMe } from '@/api/auth';
 import { useDatabase } from '@/api/databases';
+import { useKeyValue } from '@/api/keyvalue';
 import { useWorkspaceLiveUpdates } from '@/api/live';
 import { useService } from '@/api/services';
 import { useCreateWorkspace } from '@/api/workspaces';
@@ -48,6 +52,8 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   end?: boolean;
+  /** Only shown to workspace admins. */
+  admin?: boolean;
 }
 
 const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
@@ -59,12 +65,19 @@ const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
       { to: 'env-groups', label: 'Environment Groups', icon: Boxes },
     ],
   },
-  { label: 'Data', items: [{ to: 'databases', label: 'Postgres', icon: Database }] },
+  {
+    label: 'Data',
+    items: [
+      { to: 'databases', label: 'Postgres', icon: Database },
+      { to: 'key-value', label: 'Key Value', icon: DatabaseZap },
+    ],
+  },
   { label: 'Activity', items: [{ to: 'activity', label: 'Events', icon: Activity }] },
   {
     label: 'Workspace',
     items: [
       { to: 'api-keys', label: 'API Keys', icon: KeyRound },
+      { to: 'audit-logs', label: 'Audit Logs', icon: FileClock, admin: true },
       { to: 'settings', label: 'Settings', icon: Settings },
     ],
   },
@@ -77,6 +90,8 @@ const SECTIONS: Record<string, { label: string; icon: LucideIcon }> = {
   blueprints: { label: 'Blueprints', icon: FileStack },
   'env-groups': { label: 'Environment Groups', icon: Boxes },
   databases: { label: 'Postgres', icon: Database },
+  'key-value': { label: 'Key Value', icon: DatabaseZap },
+  'audit-logs': { label: 'Audit Logs', icon: FileClock },
   activity: { label: 'Events', icon: Activity },
   'api-keys': { label: 'API Keys', icon: KeyRound },
   settings: { label: 'Workspace settings', icon: Settings },
@@ -236,7 +251,7 @@ function Sidebar({
           <div key={g.label ?? gi} className={cn(gi > 0 && (collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5'))}>
             {g.label && !collapsed && <div className="nv-label px-3 pb-2">{g.label}</div>}
             <ul>
-              {g.items.map((n) => (
+              {g.items.filter((n) => !n.admin || ctx.isAdmin).map((n) => (
                 <li key={n.label}>
                   <NavLink
                     to={`/w/${ctx.ws}${n.to ? `/${n.to}` : ''}`}
@@ -407,9 +422,11 @@ function Breadcrumb({ ws }: { ws: string }) {
   const def = SECTIONS[section] ?? SECTIONS[''];
   const serviceId = section === 'services' && id ? id : undefined;
   const databaseId = section === 'databases' && id && id !== 'new' ? id : undefined;
+  const keyValueId = section === 'key-value' && id && id !== 'new' ? id : undefined;
   const service = useService(serviceId);
   const database = useDatabase(databaseId);
-  const leaf = serviceId ? service.data?.name : databaseId ? database.data?.name : undefined;
+  const keyValue = useKeyValue(keyValueId);
+  const leaf = serviceId ? service.data?.name : databaseId ? database.data?.name : keyValueId ? keyValue.data?.name : undefined;
   const Icon = def.icon;
   const sectionHref = section === 'services' ? `/w/${ws}` : `/w/${ws}${section ? `/${section}` : ''}`;
   return (
@@ -433,6 +450,19 @@ function Breadcrumb({ ws }: { ws: string }) {
         </span>
       )}
     </nav>
+  );
+}
+
+/** The workspace requires 2FA and the signed-in user has not turned it on: its APIs answer 403 mfa_required. */
+function MfaRequiredBanner({ ws }: { ws: string }) {
+  return (
+    <div role="alert" className="mb-6 flex flex-wrap items-center gap-3 rounded-[3px] border border-warning/40 bg-warning-soft px-4 py-3 text-[13.5px] text-fg">
+      <ShieldAlert className="size-4 shrink-0 text-warning" aria-hidden />
+      <span className="min-w-0 flex-1">This workspace requires two-factor authentication. Turn it on for your account to manage its resources.</span>
+      <Link to={`/w/${ws}/account#security`} className="font-medium text-accent hover:underline">
+        Set up 2FA
+      </Link>
+    </div>
   );
 }
 
@@ -613,6 +643,7 @@ export function WorkspaceLayout() {
 
           <main id="main" className="min-w-0 flex-1 px-4 py-6 min-[900px]:px-10 min-[900px]:py-10">
             <div className="mx-auto w-full max-w-[1200px]">
+              {ctx.workspace.requireTwoFactor && !ctx.user.mfaEnabled && !location.pathname.endsWith('/account') && <MfaRequiredBanner ws={ctx.ws} />}
               <ErrorBoundary resetKey={location.pathname}>
                 <Outlet />
               </ErrorBoundary>

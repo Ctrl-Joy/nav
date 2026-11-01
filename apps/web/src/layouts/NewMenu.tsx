@@ -8,6 +8,7 @@ export const NEW_ITEMS: ResourceKind[] = ['web', 'private', 'worker', 'cron', 's
 
 export function newResourcePath(ws: string, kind: ResourceKind): string {
   if (kind === 'postgres') return `/w/${ws}/databases/new`;
+  if (kind === 'keyvalue') return `/w/${ws}/key-value/new`;
   if (kind === 'blueprint') return `/w/${ws}/blueprints/new`;
   return `/w/${ws}/new/${kind}`;
 }
@@ -68,6 +69,7 @@ export function NewMenu({
       <DropdownSeparator />
       <DropdownLabel>Data & infrastructure</DropdownLabel>
       {item('postgres')}
+      {item('keyvalue')}
       {item('blueprint')}
     </Dropdown>
   );

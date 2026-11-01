@@ -9,7 +9,7 @@ import { config } from '@nav/shared/config';
 import { q } from '../db/pool.ts';
 import { enqueue } from '../lib/core.ts';
 import { NODE_TTL_S } from './cluster.ts';
-import type { Ctx } from './handlers.ts';
+import { registryAuth, type Ctx } from './handlers.ts';
 import type { Artifact } from './runtime/types.ts';
 
 const artifactsDir = path.join(config.dataDir, 'artifacts');
@@ -42,7 +42,7 @@ export async function localize(ctx: Ctx, artifact: Artifact, log: (l: string) =>
   if (artifact.kind === 'image') {
     if (!ctx.driver.hasImage || (await ctx.driver.hasImage(artifact.ref))) return artifact;
     if (!isBuiltImage(artifact)) {
-      await ctx.driver.pullImage!(artifact.ref, log);
+      await ctx.driver.pullImage!(artifact.ref, log, await registryAuth(artifact.registryCredentialId));
       return artifact;
     }
     if (!artifact.store) throw new Error(`image ${artifact.ref} exists only on node ${artifact.nodeId ?? 'unknown'} and was not uploaded`);

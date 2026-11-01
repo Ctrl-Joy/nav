@@ -2,7 +2,9 @@ import type { Plan, SecretFile, Disk } from '@nav/shared';
 import type { StoredArtifact } from '@nav/shared/artifacts';
 
 /** `nodeId` is the node that built it; `store` is set once it has been uploaded for other nodes to fetch. */
-interface Placed { nodeId?: string; store?: StoredArtifact }
+interface Placed { nodeId?: string; store?: StoredArtifact; registryCredentialId?: string }
+
+export interface RegistryAuth { serveraddress: string; username: string; password: string }
 
 export type Artifact =
   | ({ kind: 'dir'; root: string; path: string; runtime: string; startCommand: string | null } & Placed)
@@ -47,10 +49,22 @@ export interface Handle {
 
 export interface Usage { cpu: number; memBytes: number }
 
+/** An interactive shell inside a running instance. `tty` is false when only pipes are available (process driver). */
+export interface ExecSession {
+  tty: boolean;
+  write(data: Buffer): void;
+  resize(cols: number, rows: number): void;
+  onData(cb: (chunk: Buffer) => void): void;
+  exited: Promise<number>;
+  kill(): void;
+}
+
+export interface ExecOptions { cwd: string | null; env: Record<string, string>; cols: number; rows: number }
+
 export interface Driver {
   name: 'process' | 'docker';
   build(ctx: BuildContext, detected: { runtime: string; buildCommand: string | null; startCommand: string | null }): Promise<Artifact>;
-  pullImage?(imageUrl: string, log: (l: string) => void): Promise<Artifact>;
+  pullImage?(imageUrl: string, log: (l: string) => void, auth?: RegistryAuth): Promise<Artifact>;
   start(spec: StartSpec): Promise<Handle>;
   /** Re-attach to instances that survived an agent restart (docker). */
   adopt?(ref: string, onLog: (line: string) => void): Promise<Handle | null>;
@@ -61,4 +75,6 @@ export interface Driver {
   saveImage?(ref: string): Promise<NodeJS.ReadableStream>;
   loadImage?(tar: NodeJS.ReadableStream): Promise<void>;
   removeServiceData?(serviceId: string): Promise<void>;
+  /** Opens a shell in the instance identified by its handle ref (container id or pid). */
+  exec?(ref: string, opts: ExecOptions): Promise<ExecSession>;
 }

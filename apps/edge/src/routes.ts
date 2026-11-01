@@ -2,6 +2,7 @@
 // The table source is pluggable: DbRouteWatcher (LISTEN nav_routes + safety poll) in production,
 // or RouteTable.setRows() directly in tests.
 import type pg from 'pg';
+import { parseCidr, type Cidr } from './access.ts';
 
 export interface Upstream { id: string; host: string; port: number }
 export interface DomainEntry { domain: string; redirectTo: string | null }
@@ -21,6 +22,11 @@ export interface Route {
   artifact: Artifact | null;
   upstreams: Upstream[];
   domains: DomainEntry[];
+  /** Inbound IP rules; empty = everyone. */
+  ipRules: Cidr[];
+  edgeCache: { enabled: boolean; maxTtlSeconds: number };
+  /** Changes on every deploy or purge; cached responses from an older value are dropped. */
+  cacheVersion: string;
 }
 
 /** Row shape of the `edge_routes` view (snake_case, json columns may arrive parsed or as text). */
@@ -36,6 +42,10 @@ export interface EdgeRouteRow {
   artifact?: unknown;
   upstreams?: unknown;
   domains?: unknown;
+  ip_allow_list?: unknown;
+  edge_cache?: unknown;
+  cache_epoch?: number | null;
+  deploy_id?: string | null;
 }
 
 export interface HostMatch { route: Route; redirectTo: string | null; host: string }
@@ -63,6 +73,12 @@ export function normalizeRow(row: EdgeRouteRow): Route {
     upstreams: arr<Upstream>(row.upstreams)
       .filter((u) => u && u.host && Number.isInteger(Number(u.port)))
       .map((u) => ({ id: String(u.id), host: String(u.host), port: Number(u.port) })),
+    ipRules: arr<{ cidr?: string }>(row.ip_allow_list).map((r) => parseCidr(String(r?.cidr ?? ''))).filter((c): c is Cidr => c !== null),
+    edgeCache: (() => {
+      const c = json<{ enabled?: boolean; maxTtlSeconds?: number }>(row.edge_cache, {});
+      return { enabled: c.enabled === true, maxTtlSeconds: Math.min(Math.max(Number(c.maxTtlSeconds) || 86400, 1), 31536000) };
+    })(),
+    cacheVersion: `${row.deploy_id ?? ''}:${row.cache_epoch ?? 0}`,
     domains: arr<DomainEntry>(row.domains)
       .filter((d) => d && typeof d.domain === 'string')
       .map((d) => ({ domain: d.domain.toLowerCase().replace(/\.$/, ''), redirectTo: d.redirectTo ? String(d.redirectTo).toLowerCase() : null })),

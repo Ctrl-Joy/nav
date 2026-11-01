@@ -99,8 +99,13 @@ export function atLeast(role: Role, min: Role): boolean {
 /** Ensures the caller is a member of the workspace with at least `min` role; returns their role. */
 export async function workspaceRole(req: FastifyRequest, workspaceId: string, min: Role = 'viewer'): Promise<Role> {
   const user = requireUser(req);
-  const row = await one<{ role: Role }>('SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2', [workspaceId, user.id]);
+  const row = await one<{ role: Role; require_2fa: boolean; mfa: boolean }>(
+    `SELECT m.role, w.require_2fa, u.totp_enabled_at IS NOT NULL AS mfa FROM workspace_members m
+     JOIN workspaces w ON w.id = m.workspace_id JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND m.user_id = $2`,
+    [workspaceId, user.id],
+  );
   if (!row) throw notFound('workspace');
+  if (row.require_2fa && !row.mfa) throw new HttpError(403, 'mfa_required', 'this workspace requires two-factor authentication — turn it on in your account settings');
   if (!atLeast(row.role, min)) throw forbidden();
   return row.role;
 }

@@ -60,6 +60,10 @@ const UpdateService = CreateService.omit({ type: true, envVars: true, secretFile
   staticHeaders: z.array(z.object({ path: z.string().min(1).max(255), name: z.string().regex(/^[A-Za-z0-9-]+$/), value: z.string().max(2048) })).max(100).optional(),
   staticRoutes: z.array(z.object({ type: z.enum(['redirect', 'rewrite']), source: z.string().min(1).max(500), destination: z.string().min(1).max(1000) })).max(200).optional(),
   maintenanceMode: z.boolean().optional(),
+  ipAllowList: z.array(z.object({ cidr: z.string().regex(/^[0-9a-fA-F:.]+\/\d{1,3}$/, 'expected a CIDR like 203.0.113.0/24'), description: z.string().max(100).default('') })).max(100).optional(),
+  edgeCache: z.object({ enabled: z.boolean(), maxTtlSeconds: z.number().int().min(1).max(31_536_000).default(86_400) }).optional(),
+  shutdownDelaySeconds: z.number().int().min(1).max(300).optional(),
+  registryCredentialId: z.string().max(64).nullable().optional(),
 });
 
 const COLUMN: Record<string, string> = {
@@ -68,8 +72,9 @@ const COLUMN: Record<string, string> = {
   dockerContext: 'docker_context', publishPath: 'publish_path', healthCheckPath: 'health_check_path', port: 'port', plan: 'plan',
   instanceCount: 'instance_count', autoDeploy: 'auto_deploy', cronSchedule: 'cron_schedule', disk: 'disk', previews: 'previews',
   autoscaling: 'autoscaling', buildFilter: 'build_filter', staticHeaders: 'static_headers', staticRoutes: 'static_routes', maintenanceMode: 'maintenance_mode',
+  ipAllowList: 'ip_allow_list', edgeCache: 'edge_cache', shutdownDelaySeconds: 'shutdown_delay_s', registryCredentialId: 'registry_credential_id',
 };
-const JSON_COLS = new Set(['disk', 'previews', 'autoscaling', 'build_filter', 'static_headers', 'static_routes']);
+const JSON_COLS = new Set(['disk', 'previews', 'autoscaling', 'build_filter', 'static_headers', 'static_routes', 'ip_allow_list', 'edge_cache']);
 
 async function svcFor(req: FastifyRequest, min: 'viewer' | 'developer' | 'admin' = 'viewer') {
   const { row, role } = await scoped(req, 'services', (req.params as { id: string }).id, min);
@@ -233,6 +238,8 @@ export async function serviceRoutes(app: FastifyInstance) {
       if (k === 'healthCheckPath' && v && !(v as string).startsWith('/')) throw badRequest('healthCheckPath must start with /');
       if (k === 'rootDir' && typeof v === 'string' && (v.includes('..') || /^[/\\]/.test(v))) throw badRequest('rootDir must be relative');
       if (k === 'disk') validateDisk(v as never);
+      if (k === 'registryCredentialId' && v && !(await one('SELECT 1 FROM registry_credentials WHERE id = $1 AND workspace_id = $2', [v, svc.workspace_id]))) throw badRequest('unknown registry credential');
+      if ((k === 'ipAllowList' || k === 'edgeCache') && svc.type !== 'web' && svc.type !== 'static') throw badRequest(`${k} applies to web services and static sites`);
       next[col] = value;
       params.push(JSON_COLS.has(col) ? JSON.stringify(value) : value);
       sets.push(`${col} = $${params.length}`);
@@ -254,7 +261,7 @@ export async function serviceRoutes(app: FastifyInstance) {
       await serviceOp(row!, 'restart');
       await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: user.id, kind: 'plan_changed', data: { from: svc.plan, to: body.plan } });
     }
-    if (body.staticRoutes || body.staticHeaders || body.maintenanceMode !== undefined) await notify('nav_routes');
+    if (body.staticRoutes || body.staticHeaders || body.maintenanceMode !== undefined || body.ipAllowList || body.edgeCache) await notify('nav_routes');
     await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: user.id, kind: 'settings_updated', data: { fields: Object.keys(body) } });
     return ser.service(row!);
   });
@@ -284,6 +291,14 @@ export async function serviceRoutes(app: FastifyInstance) {
     else await createDeploy(row!, { trigger: 'manual', actorId: requireUser(req).id });
     await recordEvent({ workspaceId: svc.workspace_id, serviceId: svc.id, actorId: requireUser(req).id, kind: 'resumed' });
     return ser.service(row!);
+  });
+
+  /** Empties the edge cache for this service (it also empties itself on every deploy). */
+  app.post('/services/:id/cache/purge', async (req) => {
+    const { svc } = await svcFor(req, 'developer');
+    await q('UPDATE services SET cache_epoch = cache_epoch + 1 WHERE id = $1', [svc.id]);
+    await notify('nav_routes');
+    return { ok: true };
   });
 
   app.post('/services/:id/restart', async (req) => {
