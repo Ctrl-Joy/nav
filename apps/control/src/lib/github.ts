@@ -1,11 +1,14 @@
 // GitHub integration: App JWT auth, installation tokens, OAuth, repo listing, commit statuses, webhook signatures.
 import { createHmac, createSign, timingSafeEqual } from 'node:crypto';
 import { config } from '@nav/shared/config';
+import { effectiveProvider } from './providerSettings.ts';
 
 const API = 'https://api.github.com';
 
 export const githubAppEnabled = () => Boolean(config.github.appId && config.github.privateKey);
-export const githubOAuthEnabled = () => Boolean(config.github.clientId && config.github.clientSecret);
+/** GitHub sign-in: environment variables or credentials saved on the admin page (call ensureProviderSettings() first). */
+export const githubOAuthEnabled = () => effectiveProvider('github').enabled;
+export const githubClientId = () => effectiveProvider('github').clientId;
 
 function appJwt(): string {
   const now = Math.floor(Date.now() / 1000);
@@ -60,10 +63,11 @@ export async function userRepos(userToken: string): Promise<GhRepo[]> {
  * the account's primary address when GitHub marks it verified; otherwise it is null and sign-in is refused.
  */
 export async function oauthExchange(code: string, verifier: string, redirectUri: string): Promise<{ token: string; user: { id: number; login: string; name: string | null; email: string | null; avatar_url: string } }> {
+  const client = effectiveProvider('github');
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ client_id: config.github.clientId, client_secret: config.github.clientSecret, code, code_verifier: verifier, redirect_uri: redirectUri }),
+    body: JSON.stringify({ client_id: client.clientId, client_secret: client.clientSecret, code, code_verifier: verifier, redirect_uri: redirectUri }),
     signal: AbortSignal.timeout(15_000),
   });
   const body = (await res.json()) as { access_token?: string; error_description?: string };
