@@ -315,11 +315,6 @@ export function LandingPage() {
     <div ref={rootRef} className={`k${menu ? ' menu-open' : ''}`} data-theme={theme}>
       <div className="k-grid-bg" aria-hidden="true" />
 
-      <div className="k-announce">
-        New: blueprints keep services, databases and env groups in sync with nav.yaml.
-        <Link to="/docs">Read the docs <ArrowRight size={13} /></Link>
-      </div>
-
       <header className="k-nav">
         <div className="k-nav-inner">
           <Link to="/" className="k-brand" aria-label="NAV home"><Logo /></Link>

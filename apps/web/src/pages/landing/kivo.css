@@ -119,8 +119,6 @@
 .k-btn svg { width: 16px; height: 16px; }
 
 /* Announcement + nav */
-.k-announce { position: relative; z-index: 31; display: flex; justify-content: center; gap: 8px; padding: 8px var(--k-pad); background: var(--k-violet-soft); color: var(--k-ink); font-size: 14px; text-align: center; flex-wrap: wrap; }
-.k-announce a { text-decoration: underline; text-underline-offset: 3px; display: inline-flex; align-items: center; gap: 4px; }
 .k-nav { position: sticky; top: 0; z-index: 30; height: 64px; background: color-mix(in srgb, var(--k-bg) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--k-line); }
 .k-nav-inner { max-width: var(--k-max); height: 100%; margin: 0 auto; display: flex; align-items: center; padding-left: var(--k-pad); }
 .k-brand { display: inline-flex; align-items: center; font-size: 25px; color: var(--k-ink); }
@@ -344,7 +342,6 @@
   .k-foot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
-  .k-announce { font-size: 13px; }
   .k-steps, .k-tiles, .k-live, .k-tpls, .k-plans, .k-feats, .k-feats.three, .k-logs { grid-template-columns: 1fr; }
   .k-board-grid { grid-template-columns: 1fr 1fr; }
   .k-svc { padding: 10px; }
