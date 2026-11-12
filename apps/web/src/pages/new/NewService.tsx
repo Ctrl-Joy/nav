@@ -31,6 +31,7 @@ import { NotFoundPage } from '@/pages/NotFound';
 import { cn } from '@/lib/cn';
 import { CRON_PRESETS, describeCron } from '@/lib/cron';
 import { repoSlug } from '@/lib/format';
+import { githubInstallUrl, useGithubInstallResult } from '@/lib/githubInstall';
 import { useTitle } from '@/lib/useTitle';
 
 const SERVICE_TYPES: ServiceType[] = ['web', 'private', 'worker', 'cron', 'static', 'workflow'];
@@ -103,6 +104,7 @@ function Wizard({ type }: { type: ServiceType }) {
   const envGroups = useEnvGroups(ws);
   const githubEnabled = !!config?.githubEnabled;
   const repos = useRepos(ws, githubEnabled);
+  useGithubInstallResult(ws);
   // Repos from the app carry an installation id; if none do, pushes will not auto-deploy until the app is installed.
   const needsApp = !!config?.githubAppSlug && !!repos.data && !repos.data.items.some((r) => r.installationId !== null);
 
@@ -258,17 +260,9 @@ function Wizard({ type }: { type: ServiceType }) {
                       <span className="font-medium text-fg">Deploy on every push.</span> Install the NAV GitHub App once and your pushes deploy automatically.
                     </p>
                     <div className="flex shrink-0 gap-2">
-                      <a
-                        className={buttonClass('secondary', 'sm')}
-                        href={`https://github.com/apps/${config?.githubAppSlug}/installations/new`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className={buttonClass('secondary', 'sm')} href={githubInstallUrl(ws, window.location.pathname)}>
                         Install app
                       </a>
-                      <Button size="sm" variant="ghost" onClick={() => repos.refetch()} loading={repos.isFetching}>
-                        I installed it
-                      </Button>
                     </div>
                   </div>
                 )}

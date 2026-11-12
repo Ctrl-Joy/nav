@@ -17,6 +17,7 @@ import { databaseFeatureRoutes } from './routes/databaseFeatures.ts';
 import { envGroupRoutes } from './routes/envgroups.ts';
 import { blueprintRoutes } from './routes/blueprints.ts';
 import { webhookRoutes } from './routes/webhooks.ts';
+import { githubAppRoutes } from './routes/githubApp.ts';
 import { internalRoutes } from './routes/internal.ts';
 import { mfaRoutes } from './routes/mfa.ts';
 import { attachShellRelay } from './shell.ts';
@@ -132,6 +133,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await envGroupRoutes(api);
       await blueprintRoutes(api);
       await webhookRoutes(api);
+      await githubAppRoutes(api);
       await platformRoutes(api);
       await orgRoutes(api);
       await usageRoutes(api);

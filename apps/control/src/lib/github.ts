@@ -41,7 +41,12 @@ export async function installationToken(installationId: number): Promise<string>
   return res.token;
 }
 
-export interface GhRepo { full_name: string; clone_url: string; default_branch: string; private: boolean }
+export interface GhRepo { full_name: string; clone_url: string; default_branch: string; private: boolean; permissions?: { admin?: boolean } }
+
+/** An installation of this GitHub App: which account it is on. Read with the App's own JWT. */
+export async function appInstallation(installationId: number): Promise<{ id: number; account: { id: number; login: string; type: string } }> {
+  return gh(`/app/installations/${installationId}`, { jwt: true });
+}
 
 export async function installationRepos(installationId: number): Promise<GhRepo[]> {
   const token = await installationToken(installationId);

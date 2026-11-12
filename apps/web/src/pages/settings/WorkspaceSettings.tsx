@@ -30,6 +30,7 @@ import {
 } from '@/components/ui';
 import { useWorkspace } from '@/layouts/WorkspaceContext';
 import { cn } from '@/lib/cn';
+import { githubInstallUrl, useGithubInstallResult } from '@/lib/githubInstall';
 import { useTitle } from '@/lib/useTitle';
 import { EditActions, EditLink, Row, Section } from './parts';
 import { LogStreamsSection, LoginSettingsSection, MetricsStreamSection, RegistrySection, WebhooksSection } from './WorkspaceIntegrations';
@@ -337,7 +338,8 @@ function AuditSection() {
 }
 
 function IntegrationsSection() {
-  const { user, config } = useWorkspace();
+  const { ws, user, config } = useWorkspace();
+  useGithubInstallResult(ws);
   const enabled = !!config?.githubEnabled;
   return (
     <Section id="integrations" title="Integrations" description="Connect GitHub to pick repositories, auto-deploy on push and create PR previews.">
@@ -366,7 +368,7 @@ function IntegrationsSection() {
         {enabled && (
           <div className="flex flex-wrap gap-2">
             {config?.githubAppSlug && (
-              <a className={buttonClass('secondary', 'md')} href={`https://github.com/apps/${config.githubAppSlug}/installations/new`} target="_blank" rel="noreferrer">
+              <a className={buttonClass('secondary', 'md')} href={githubInstallUrl(ws, window.location.pathname)}>
                 Configure app access
               </a>
             )}
