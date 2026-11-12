@@ -76,7 +76,7 @@ export function KeyValueLayout() {
           <ResourceIcon kind="keyvalue" className="size-10" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-[24px] leading-tight font-normal tracking-[-0.02em] md:text-[28px]">{k.name}</h1>
+              <h1 className="truncate text-[21px] leading-[1.2] font-semibold tracking-[-0.02em] md:text-[24px]">{k.name}</h1>
               <StatusPill status={k.status} />
             </div>
             <p className="mt-0.5 text-[13px] text-fg-muted">

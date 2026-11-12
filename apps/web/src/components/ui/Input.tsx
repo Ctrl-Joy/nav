@@ -2,8 +2,8 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type Texta
 import { cn } from '@/lib/cn';
 
 export const controlClass =
-  'w-full rounded-[3px] border border-border-strong bg-transparent px-2.5 text-[13px] text-fg placeholder:text-fg-subtle ' +
-  'transition-colors hover:border-fg-subtle focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent ' +
+  'w-full rounded-[3px] border border-border-strong bg-bg px-2.5 text-[13px] text-fg placeholder:text-fg-subtle ' +
+  'transition-[border-color,box-shadow] hover:border-fg-subtle focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 ' +
   'disabled:cursor-not-allowed disabled:opacity-60 aria-[invalid=true]:border-danger';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -103,6 +103,7 @@ export function Switch({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors disabled:opacity-50',
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         checked ? 'border-accent-strong bg-accent-strong' : 'border-border-strong bg-surface-3',
       )}
     >

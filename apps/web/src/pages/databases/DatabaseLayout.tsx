@@ -80,7 +80,7 @@ export function DatabaseLayout() {
           <ResourceIcon kind="postgres" className="size-10" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-[24px] leading-tight font-normal tracking-[-0.02em] md:text-[28px]">{d.name}</h1>
+              <h1 className="truncate text-[21px] leading-[1.2] font-semibold tracking-[-0.02em] md:text-[24px]">{d.name}</h1>
               <StatusPill status={d.status} />
             </div>
             <p className="mt-0.5 text-[13px] text-fg-muted">

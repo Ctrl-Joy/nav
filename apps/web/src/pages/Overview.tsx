@@ -215,7 +215,7 @@ export function OverviewPage() {
   return (
     <div>
       <div className="mb-10 flex flex-wrap items-start justify-between gap-4">
-        <h1 className="text-[26px] leading-tight font-normal tracking-[-0.02em] text-fg md:text-[30px]">Overview</h1>
+        <h1 className="text-[22px] leading-[1.2] font-semibold tracking-[-0.02em] text-fg md:text-[26px]">Overview</h1>
         <Link to={`/w/${ws}/settings#members`} className="mt-2 inline-flex items-center gap-1.5 text-[13.5px] text-link hover:underline">
           <UserPlus className="size-4" strokeWidth={1.75} aria-hidden />
           Invite your team

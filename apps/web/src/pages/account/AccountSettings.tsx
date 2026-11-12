@@ -730,7 +730,7 @@ export function AccountSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-5 py-10 sm:px-10">
-      <h1 className="text-[34px] font-normal tracking-[-0.02em] text-fg">Account settings</h1>
+      <h1 className="text-[22px] leading-[1.2] font-semibold md:text-[26px] tracking-[-0.02em] text-fg">Account settings</h1>
       {error && (
         <div role="alert" className="mt-6 flex items-start gap-3 border border-danger/40 bg-danger-soft px-4 py-3 text-[14.5px] text-fg">
           <span className="flex-1">{error}</span>

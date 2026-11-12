@@ -222,7 +222,7 @@ function Wizard({ type }: { type: ServiceType }) {
             <meta.icon className="size-5" />
           </span>
           <div>
-            <h1 className="text-[24px] leading-tight font-normal tracking-[-0.02em] md:text-[28px]">New {meta.label}</h1>
+            <h1 className="text-[21px] leading-[1.2] font-semibold tracking-[-0.02em] md:text-[24px]">New {meta.label}</h1>
             <p className="text-[13px] text-fg-muted">{meta.description}</p>
           </div>
         </div>

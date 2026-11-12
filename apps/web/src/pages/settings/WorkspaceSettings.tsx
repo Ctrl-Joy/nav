@@ -420,7 +420,7 @@ export function WorkspaceSettingsPage() {
     <div>
       <div className="mb-10">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[26px] leading-tight font-normal tracking-[-0.02em] text-fg md:text-[30px]">Workspace settings</h1>
+          <h1 className="text-[22px] leading-[1.2] font-semibold tracking-[-0.02em] text-fg md:text-[26px]">Workspace settings</h1>
           <Badge tone="accent" className="font-mono tracking-wider uppercase">
             {workspace.role}
           </Badge>

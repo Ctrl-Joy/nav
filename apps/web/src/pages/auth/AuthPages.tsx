@@ -21,15 +21,36 @@ export function safeNext(next: string | null): string | null {
 
 function AuthLayout({ title, sub, children }: { title: string; sub?: ReactNode; children: ReactNode }) {
   return (
-    <div className="au" data-theme="dark">
-      <header className="au-top">
-        <Link to="/" className="au-brand" aria-label="NAV home"><Logo /></Link>
-      </header>
-      <main className="au-main">
-        <h1 className="au-title">{title}</h1>
-        {sub && <p className="au-sub">{sub}</p>}
-        {children}
-      </main>
+    <div className="au">
+      <div className="au-col">
+        <header className="au-top">
+          <Link to="/" className="au-brand" aria-label="NAV home"><Logo /></Link>
+        </header>
+        <main className="au-main">
+          <h1 className="au-title">{title}</h1>
+          {sub && <p className="au-sub">{sub}</p>}
+          {children}
+        </main>
+      </div>
+      {/* Decorative: an illustrative deploy transcript, hidden below 1040px and from assistive tech. */}
+      <aside className="au-side" aria-hidden="true">
+        <span className="au-kicker">Push to deploy</span>
+        <h2>Connect a repository. NAV builds it, checks it and routes traffic to it.</h2>
+        <div className="au-term">
+          <div className="au-term-bar"><span>deploy · api</span><span className="au-term-live">Live</span></div>
+          <div className="au-term-body">
+            <div className="au-term-row cmd"><span>git push origin main</span></div>
+            <div className="au-term-row"><b>build</b><span>Node 24 detected · npm ci · npm run build</span><i>38s</i></div>
+            <div className="au-term-row"><b>health</b><span>GET /healthz → 200</span><i>1s</i></div>
+            <div className="au-term-row"><b>route</b><span>api.example.com → 2 instances</span><i>0s</i></div>
+            <div className="au-term-row ok"><b>done</b><span>previous deploy kept for rollback</span><i>live</i></div>
+          </div>
+        </div>
+        <ul className="au-points">
+          <li>Zero-downtime deploys: the old instance stops only after the new one is healthy.</li>
+          <li>Runs on servers you control, with logs, metrics and rollbacks built in.</li>
+        </ul>
+      </aside>
     </div>
   );
 }

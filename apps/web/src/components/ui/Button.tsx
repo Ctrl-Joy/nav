@@ -7,14 +7,14 @@ export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const base =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[3px] ' +
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 select-none';
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-45 select-none';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'nv-btn nv-cta',
   secondary: 'nv-btn nv-hair',
-  ghost: 'font-medium text-fg-muted transition-colors hover:text-fg hover:bg-surface-2',
+  ghost: 'nv-btn font-medium text-fg-muted hover:text-fg hover:bg-surface-2',
   danger: 'nv-btn border border-danger bg-danger font-medium text-white hover:brightness-110 dark:text-black',
-  'outline-danger': 'font-medium border border-danger/50 text-danger transition-colors hover:bg-danger-soft',
+  'outline-danger': 'nv-btn border border-danger/50 text-danger hover:border-danger hover:bg-danger-soft',
 };
 
 const sizes: Record<ButtonSize, string> = {

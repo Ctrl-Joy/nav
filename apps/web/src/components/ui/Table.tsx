@@ -12,11 +12,11 @@ export function Table({ children, className, ...rest }: HTMLAttributes<HTMLTable
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return <thead className="border-b border-border-strong text-left">{children}</thead>;
+  return <thead className="border-y border-border bg-panel text-left">{children}</thead>;
 }
 
 export function TBody({ children }: { children: ReactNode }) {
-  return <tbody className="divide-y divide-border-strong border-b border-border-strong">{children}</tbody>;
+  return <tbody className="divide-y divide-border border-b border-border">{children}</tbody>;
 }
 
 export function Tr({ className, interactive, ...rest }: HTMLAttributes<HTMLTableRowElement> & { interactive?: boolean }) {
@@ -24,9 +24,9 @@ export function Tr({ className, interactive, ...rest }: HTMLAttributes<HTMLTable
 }
 
 export function Th({ className, ...rest }: ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th scope="col" className={cn('h-11 px-3 font-mono text-[11px] font-medium tracking-[0.08em] whitespace-nowrap text-fg-muted uppercase first:pl-4', className)} {...rest} />;
+  return <th scope="col" className={cn('h-9 px-3 font-mono text-[10.5px] font-medium tracking-[0.1em] whitespace-nowrap text-fg-subtle uppercase first:pl-4 last:pr-4', className)} {...rest} />;
 }
 
 export function Td({ className, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('h-[52px] px-3 align-middle first:pl-4', className)} {...rest} />;
+  return <td className={cn('h-12 px-3 align-middle first:pl-4 last:pr-4', className)} {...rest} />;
 }

@@ -10,8 +10,8 @@ export interface TabItem<T extends string = string> {
 
 const tabClass = (active: boolean) =>
   cn(
-    'relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-[14px] transition-colors',
-    active ? 'border-accent-strong font-medium text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+    'relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-[13.5px] whitespace-nowrap transition-colors',
+    active ? 'border-accent font-medium text-fg' : 'border-transparent text-fg-muted hover:border-border-strong hover:text-fg',
   );
 
 function onArrowKeys(e: KeyboardEvent<HTMLElement>) {
@@ -40,7 +40,7 @@ export function Tabs<T extends string>({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
-    <div ref={ref} role="tablist" aria-label={label} onKeyDown={onArrowKeys} className={cn('flex gap-5 overflow-x-auto border-b border-border', className)}>
+    <div ref={ref} role="tablist" aria-label={label} onKeyDown={onArrowKeys} className={cn('flex gap-6 overflow-x-auto border-b border-border [scrollbar-width:none]', className)}>
       {items.map((t) => (
         <button
           key={t.value}
@@ -62,7 +62,7 @@ export function Tabs<T extends string>({
 /** Route-driven tabs (each tab is a link). */
 export function RouteTabs({ items, className, label = 'Sections' }: { items: { to: string; label: ReactNode; end?: boolean }[]; className?: string; label?: string }) {
   return (
-    <nav aria-label={label} className={cn('flex gap-5 overflow-x-auto border-b border-border', className)}>
+    <nav aria-label={label} className={cn('flex gap-6 overflow-x-auto border-b border-border [scrollbar-width:none]', className)}>
       {items.map((t) => (
         <NavLink key={t.to} to={t.to} end={t.end} className={({ isActive }) => tabClass(isActive)}>
           {t.label}

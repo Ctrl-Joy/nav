@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
 import { cn } from '@/lib/cn';
 import { useTitle } from '@/lib/useTitle';
+import { ChevronDown } from 'lucide-react';
 import { DOC_GROUPS, DOC_SECTIONS, type DocBlock } from './docsContent';
 
 const FIRST_SECTION = DOC_SECTIONS[0]?.slug ?? '';
@@ -13,7 +14,7 @@ function Inline({ text }: { text: string }) {
     <>
       {text.split('`').map((part, i) =>
         i % 2 === 1 ? (
-          <code key={i} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[0.85em] text-fg">
+          <code key={i} className="rounded-[3px] bg-surface-2 px-1.5 py-0.5 font-mono text-[0.85em] [overflow-wrap:anywhere] text-fg">
             {part}
           </code>
         ) : (
@@ -33,7 +34,7 @@ function BlockView({ block }: { block: DocBlock }) {
         </p>
       );
     case 'h3':
-      return <h3 id={block.id} className="scroll-mt-20 pt-2 text-[17px] font-medium tracking-tight text-fg">{block.text}</h3>;
+      return <h3 id={block.id} className="scroll-mt-20 pt-2 text-[16px] font-semibold tracking-[-0.01em] text-fg">{block.text}</h3>;
     case 'list':
       return (
         <ul className="list-disc space-y-2 pl-5 text-[15px] leading-7 text-fg-muted marker:text-fg-subtle">
@@ -46,7 +47,7 @@ function BlockView({ block }: { block: DocBlock }) {
       );
     case 'code':
       return (
-        <pre className="rounded-xl border border-border bg-surface p-4 font-mono text-[12.5px] leading-6 text-fg overflow-x-auto">
+        <pre className="overflow-x-auto rounded-[4px] border border-border bg-surface p-4 font-mono text-[12.5px] leading-6 text-fg">
           <code>{block.code}</code>
         </pre>
       );
@@ -134,25 +135,25 @@ export function DocsPage() {
   }, []);
 
   return (
-    <div data-theme="dark" className="min-h-dvh bg-bg text-fg">
-      <header className="sticky top-0 z-20 border-b border-border bg-bg/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1280px] items-center gap-4 px-4 min-[900px]:px-6">
+    <div className="min-h-dvh bg-bg text-fg">
+      <header className="sticky top-0 z-20 border-b border-border bg-chrome">
+        <div className="mx-auto flex h-14 max-w-[1280px] items-center gap-3 px-4 min-[900px]:gap-4 min-[900px]:px-6">
           <Link to="/" aria-label="NAV home" className="shrink-0">
             <Logo />
           </Link>
-          <span className="hidden text-[14px] text-fg-subtle sm:inline">Docs</span>
-          <div className="ml-auto flex items-center gap-3">
+          <span className="hidden font-mono text-[10.5px] tracking-[0.1em] text-fg-subtle uppercase sm:inline">Docs</span>
+          <div className="ml-auto flex min-w-0 items-center gap-2 min-[900px]:gap-3">
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search docs"
               aria-label="Search documentation sections"
-              className="h-9 w-40 rounded-xl border border-border bg-surface px-3 text-[14px] text-fg outline-none placeholder:text-fg-subtle focus:border-accent sm:w-64"
+              className="h-9 w-full min-w-0 max-w-40 rounded-[3px] border border-border-strong bg-bg px-3 text-[13.5px] text-fg outline-none transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-fg-subtle focus:border-accent focus:ring-2 focus:ring-accent/25 sm:max-w-64"
             />
             <Link
               to="/app"
-              className="shrink-0 rounded-xl border border-border bg-surface px-3.5 py-1.5 text-[14px] font-medium text-fg hover:bg-surface-2"
+              className="nv-btn nv-hair inline-flex h-9 shrink-0 items-center px-3.5 text-[13.5px]"
             >
               Dashboard
             </Link>
@@ -166,12 +167,10 @@ export function DocsPage() {
         </aside>
 
         <div className="min-w-0">
-          <details className="group mt-4 rounded-xl border border-border bg-surface min-[900px]:hidden">
-            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[15px] font-medium text-fg">
+          <details className="group mt-4 rounded-[4px] border border-border bg-surface min-[900px]:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[14px] font-medium text-fg [&::-webkit-details-marker]:hidden">
               Contents
-              <span aria-hidden className="text-fg-subtle transition-transform group-open:rotate-180">
-                v
-              </span>
+              <ChevronDown aria-hidden className="size-4 text-fg-subtle transition-transform group-open:rotate-180" />
             </summary>
             <div className="border-t border-border p-4">
               <SideNav query={query} active={active} />
@@ -179,7 +178,7 @@ export function DocsPage() {
           </details>
 
           <main className="mx-auto max-w-[760px] pb-24 pt-10">
-            <h1 className="text-[34px] font-medium tracking-tight text-fg">NAV documentation</h1>
+            <h1 className="text-[28px] leading-[1.15] font-semibold tracking-[-0.02em] text-fg sm:text-[34px]">NAV documentation</h1>
             <p className="mt-3 text-[15px] leading-7 text-fg-muted">
               NAV is a self-hostable platform-as-a-service. These pages cover how to deploy services, how the platform
               works and how to operate it.
@@ -191,7 +190,7 @@ export function DocsPage() {
                 id={section.slug}
                 className="scroll-mt-20 border-t border-border py-12 first:border-t-0"
               >
-                <h2 className="text-[26px] font-medium tracking-tight text-fg">{section.title}</h2>
+                <h2 className="text-[22px] leading-[1.2] font-semibold tracking-[-0.02em] text-fg sm:text-[24px]">{section.title}</h2>
                 <div className="mt-5 space-y-4">
                   {section.blocks.map((block, i) => (
                     <BlockView key={i} block={block} />

@@ -709,7 +709,7 @@ export function OrgSettingsPage() {
       <div className="mb-10">
         <div className="flex flex-wrap items-center gap-3">
           <Building2 className="size-6 text-fg-muted" strokeWidth={1.5} aria-hidden />
-          <h1 className="text-[26px] leading-tight font-normal tracking-[-0.02em] text-fg md:text-[30px]">{org.data.name}</h1>
+          <h1 className="text-[22px] leading-[1.2] font-semibold tracking-[-0.02em] text-fg md:text-[26px]">{org.data.name}</h1>
           <Badge tone="accent" className="font-mono tracking-wider uppercase">{org.data.role}</Badge>
         </div>
         <div className="mt-2 flex items-center gap-1.5 text-[13.5px] text-fg-muted">

@@ -329,7 +329,7 @@ function WorkspaceSwitcher({ ctx, onNavigate, onCreateWorkspace, onCreateOrg, cl
 }
 
 const rowClass = (collapsed: boolean) =>
-  cn('flex h-[34px] w-full items-center gap-2.5 text-[14px] transition-colors', collapsed ? 'justify-center px-0' : 'px-3');
+  cn('flex h-8 w-full items-center gap-2.5 text-[13.5px] transition-colors', collapsed ? 'justify-center px-0' : 'px-4');
 
 function Sidebar({
   ctx,
@@ -342,14 +342,14 @@ function Sidebar({
   onToggleCollapse?: () => void;
   onNavigate?: () => void;
 }) {
-  const bottomLink = cn(rowClass(collapsed), 'h-[31px] text-[13px] text-fg-muted hover:bg-surface-2 hover:text-fg');
+  const bottomLink = cn(rowClass(collapsed), 'h-[30px] text-[13px] text-fg-subtle hover:bg-surface-2 hover:text-fg');
   const isPlatformAdmin = !!useMe().data?.user.isPlatformAdmin;
   return (
     <div className="flex h-full flex-col">
       <nav aria-label="Workspace" className="flex-1 overflow-y-auto py-3">
         {navGroups(ctx).map((g, gi) => (
           <div key={g.label ?? gi} className={cn(gi > 0 && (collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5'))}>
-            {g.label && !collapsed && <div className="nv-label px-3 pb-2">{g.label}</div>}
+            {g.label && !collapsed && <div className="nv-label px-4 pb-1.5">{g.label}</div>}
             <ul>
               {g.items.filter((n) => (!n.admin || ctx.isAdmin) && (!n.write || ctx.canWrite)).map((n) => (
                 <li key={n.label}>
@@ -359,7 +359,7 @@ function Sidebar({
                     onClick={onNavigate}
                     title={collapsed ? n.label : undefined}
                     aria-label={collapsed ? n.label : undefined}
-                    className={({ isActive }) => cn(rowClass(collapsed), isActive ? 'nv-active' : 'text-fg hover:bg-surface-2')}
+                    className={({ isActive }) => cn(rowClass(collapsed), 'nv-row', isActive && 'nv-active')}
                   >
                     <n.icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
                     {!collapsed && <span className="truncate">{n.label}</span>}
@@ -371,13 +371,13 @@ function Sidebar({
         ))}
         {isPlatformAdmin && (
           <div className={cn(collapsed ? 'mt-3 border-t border-border pt-3' : 'mt-5')}>
-            {!collapsed && <div className="nv-label px-3 pb-2">Instance</div>}
+            {!collapsed && <div className="nv-label px-4 pb-1.5">Instance</div>}
             <NavLink
               to={`/w/${ctx.ws}/admin/sign-in`}
               onClick={onNavigate}
               title={collapsed ? 'Sign-in providers' : undefined}
               aria-label={collapsed ? 'Sign-in providers' : undefined}
-              className={({ isActive }) => cn(rowClass(collapsed), isActive ? 'nv-active' : 'text-fg hover:bg-surface-2')}
+              className={({ isActive }) => cn(rowClass(collapsed), 'nv-row', isActive && 'nv-active')}
             >
               <ShieldCheck className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
               {!collapsed && <span className="truncate">Sign-in providers</span>}
@@ -408,7 +408,7 @@ function Sidebar({
           </button>
         )}
         {!collapsed && (
-          <div className="flex items-center justify-between px-3 pt-2 font-mono text-[10.5px] text-fg-subtle">
+          <div className="flex items-center justify-between px-4 pt-2 font-mono text-[10.5px] text-fg-subtle">
             <span>NAV {ctx.config?.version ? `v${ctx.config.version}` : ''}</span>
             {ctx.config?.driver && <span>{ctx.config.driver}</span>}
           </div>
@@ -662,7 +662,7 @@ export function WorkspaceLayout() {
         Skip to content
       </a>
       <div className="flex min-h-dvh flex-col bg-bg">
-        <header className="sticky top-0 z-40 flex h-[46px] shrink-0 items-stretch border-b border-border bg-bg">
+        <header className="sticky top-0 z-40 flex h-[46px] shrink-0 items-stretch border-b border-border bg-chrome">
           <button
             type="button"
             aria-label="Open navigation"
@@ -685,10 +685,11 @@ export function WorkspaceLayout() {
           <Breadcrumb ws={ctx.ws} />
           <div className="ml-auto flex h-full items-stretch">
             <span
-              className="hidden items-center px-3 lg:flex"
+              className="hidden items-center gap-2 px-4 font-mono text-[10.5px] tracking-[0.1em] text-fg-subtle uppercase lg:flex"
               title={liveState === 'open' ? 'Live updates connected' : 'Live updates reconnecting'}
             >
               <span className={cn('size-1.5 rounded-full', liveState === 'open' ? 'bg-success' : 'animate-pulse-dot bg-warning')} />
+              <span aria-hidden>{liveState === 'open' ? 'Live' : 'Reconnecting'}</span>
               <span className="sr-only">{liveState === 'open' ? 'Live updates connected' : 'Live updates reconnecting'}</span>
             </span>
             <BarCell className="border-l-0 min-[900px]:border-l-0">
@@ -725,7 +726,7 @@ export function WorkspaceLayout() {
         <div className="flex min-h-0 flex-1">
           <aside
             className={cn(
-              'sticky top-[46px] hidden h-[calc(100dvh-46px)] shrink-0 border-r border-border bg-bg min-[900px]:block',
+              'sticky top-[46px] hidden h-[calc(100dvh-46px)] shrink-0 border-r border-border bg-chrome min-[900px]:block',
               collapsed ? 'w-14' : 'w-60',
             )}
           >
@@ -735,7 +736,7 @@ export function WorkspaceLayout() {
           {drawer && (
             <div className="fixed inset-0 z-50 min-[900px]:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
               <div className="absolute inset-0 animate-fade-in bg-black/60" onClick={() => setDrawer(false)} />
-              <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-bg">
+              <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-chrome">
                 <div className="flex h-[46px] shrink-0 items-stretch border-b border-border">
                   <div className="min-w-0 flex-1">
                     <WorkspaceSwitcher ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} onCreateOrg={() => setCreateOrg(true)} className="w-full" />

@@ -55,7 +55,7 @@ export function Onboarding({ welcome }: { welcome?: boolean }) {
     <div className="relative overflow-hidden rounded-[3px] border border-border-strong bg-panel">
       <div className="relative px-6 pt-8 pb-6 md:px-10 md:pt-10">
         <LogoMark className="h-8" />
-        <h2 className="mt-5 text-[26px] font-normal tracking-[-0.02em]">
+        <h2 className="mt-5 text-[22px] font-semibold tracking-[-0.02em]">
           {welcome ? `Welcome to NAV, ${user.name.split(' ')[0] || 'there'}.` : `Let’s set up ${workspace.name}.`}
         </h2>
         <p className="mt-1.5 max-w-xl text-[14px] text-fg-muted">Three steps to a production-ready stack. You can do them in any order.</p>
