@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, Pause, Play, Search, Trash2 } from 'lucide-react';
 import { buildUrl } from '@/api/client';
 import { fetchServiceLogs, useInstances, type LogQuery } from '@/api/services';
+import { CopyLogsButton, logsToText } from '@/components/logs/CopyLogsButton';
 import { LogViewer } from '@/components/logs/LogViewer';
 import { useLogTail } from '@/components/logs/useLogTail';
 import { Button, Input, Select } from '@/components/ui';
-import { stripAnsi } from '@/lib/ansi';
 import { downloadText } from '@/lib/misc';
 import { useServiceCtx } from './context';
 
@@ -73,7 +73,7 @@ export function ServiceLogsTab() {
   const tail = useLogTail({ key, fetchPage, streamUrl, live: live && !range });
 
   const download = () => {
-    const body = tail.lines.map((l) => `${l.ts} [${l.stream}] [${l.level}]${l.instanceId ? ` [${l.instanceId}]` : ''} ${stripAnsi(l.message)}`).join('\n');
+    const body = logsToText(tail.lines, true);
     downloadText(`${service.slug}-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.log`, body);
   };
 
@@ -106,6 +106,7 @@ export function ServiceLogsTab() {
           <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} onClick={tail.clear}>
             Clear
           </Button>
+          <CopyLogsButton lines={tail.lines} withInstance />
           <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} onClick={download} disabled={!tail.lines.length}>
             Download
           </Button>

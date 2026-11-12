@@ -4,6 +4,7 @@ import { ArrowLeft, Check, CircleDashed, GitCommit, Undo2, X } from 'lucide-reac
 import type { Deploy, LogLine } from '@nav/shared';
 import { api, buildUrl } from '@/api/client';
 import { useCancelDeploy, useDeploy, useRollback } from '@/api/services';
+import { CopyLogsButton } from '@/components/logs/CopyLogsButton';
 import { LogViewer } from '@/components/logs/LogViewer';
 import { useLogTail } from '@/components/logs/useLogTail';
 import { RelativeTime, useNow } from '@/components/RelativeTime';
@@ -199,7 +200,10 @@ export function DeployDetailTab() {
       </Card>
 
       <div>
-        <h3 className="mb-2 text-[13px] font-medium text-fg-muted">Build & deploy logs</h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-[13px] font-medium text-fg-muted">Build & deploy logs</h3>
+          <CopyLogsButton lines={tail.lines} />
+        </div>
         {tail.error && <p className="mb-2 text-xs text-danger">{tail.error}</p>}
         <LogViewer
           lines={tail.lines}
