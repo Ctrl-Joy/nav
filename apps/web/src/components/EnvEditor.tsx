@@ -127,9 +127,10 @@ export function EnvVarEditor({
             </p>
           )}
           {value.map((v, i) => (
-            <div key={i} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2">
+            <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 max-sm:rounded-[4px] max-sm:border max-sm:border-border max-sm:bg-panel max-sm:p-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto]">
               <Input
                 mono
+                className="max-sm:col-span-2"
                 value={v.key}
                 placeholder="KEY"
                 aria-label={`Key ${i + 1}`}

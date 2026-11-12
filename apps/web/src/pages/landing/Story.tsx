@@ -5,6 +5,7 @@ import {
   Lock, Maximize2, Minus, Network, Pencil, Plus, RefreshCw, RotateCcw, ScrollText, Shield, Sparkles, Users, Workflow, Zap,
 } from 'lucide-react';
 import { LogoMark } from '@/components/Logo';
+import { setVar, watchBoxes } from './scrollBox';
 import './story.css';
 
 /* ------------------------------------------------------------------------------------------------------------------
@@ -51,12 +52,23 @@ function Scaled({ w, h, children, className }: { w: number; h?: number; children
     const el = outer.current;
     const content = inner.current;
     if (!el || !content) return;
-    const fit = () => {
-      setS(Math.min(1.15, el.clientWidth / w));
-      if (h === undefined) setDesignH(content.offsetHeight);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
+    // Sizes come from the observer entries, which the browser delivers after its own layout pass. Reading
+    // clientWidth here instead would force a synchronous layout of the whole page while it is still mounting.
+    let width = 0;
+    let contentH = h ?? 0;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        if (e.target === el) width = e.contentRect.width;
+        else if (h === undefined) contentH = (e.target as HTMLElement).offsetHeight;
+      }
+      if (!width) return;
+      const scale = Math.min(1.15, width / w);
+      // Applied directly as well, so the first painted frame is already at the right scale.
+      content.style.transform = `scale(${scale})`;
+      el.style.height = `${contentH * scale}px`;
+      setS(scale);
+      if (h === undefined) setDesignH(contentH);
+    });
     ro.observe(el);
     ro.observe(content);
     return () => ro.disconnect();
@@ -810,7 +822,7 @@ function ChapterText({ c }: { c: Chapter }) {
   return (
     <div className="st-copy k-rv">
       <span className="st-pill-label">{c.pill}</span>
-      <h3 className="st-h">{c.title[0]}<br />{c.title[1]}</h3>
+      <h2 className="st-h">{c.title[0]}<br />{c.title[1]}</h2>
       <p className="st-p">{c.body} <Link to={c.href} className="st-more">Learn more <ArrowRight /></Link></p>
     </div>
   );
@@ -833,30 +845,16 @@ export function Story() {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight;
+    const thumb = el.querySelector<HTMLElement>('.st-thumb');
+    // Positions are cached and derived from scrollY, so scrolling never forces a layout.
+    return watchBoxes(() => [el, ...el.querySelectorAll<HTMLElement>('.st-ch')], ([r, ...chapters], vh) => {
       const y = Math.max(0, Math.min(r.height - 104, vh * 0.5 - r.top - 52));
-      el.style.setProperty('--thumb', `${y.toFixed(1)}px`);
-      const chapters = [...el.querySelectorAll<HTMLElement>('.st-ch')];
+      // Set on the thumb itself: on the section it would restyle every chapter and mock on each scroll frame.
+      if (thumb) setVar(thumb, '--thumb', `${y.toFixed(1)}px`);
       let idx = 0;
-      chapters.forEach((ch, i) => { if (ch.getBoundingClientRect().top <= vh * 0.5) idx = i; });
+      chapters.forEach((ch, i) => { if (ch.top <= vh * 0.5) idx = i; });
       setActive(idx);
-    };
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
+    });
   }, []);
 
   return (
@@ -871,7 +869,7 @@ export function Story() {
               <div className="st-visual k-rv">{c.mock}</div>
               <div className="st-feats">
                 {c.features.map((f) => (
-                  <div key={f.title} className="st-feat k-rv"><span>{f.icon}</span><h4>{f.title}</h4><p>{f.body}</p></div>
+                  <div key={f.title} className="st-feat k-rv"><span>{f.icon}</span><h3>{f.title}</h3><p>{f.body}</p></div>
                 ))}
               </div>
             </>
@@ -881,7 +879,7 @@ export function Story() {
                 <ChapterText c={c} />
                 <ul className="st-list">
                   {c.features.map((f) => (
-                    <li key={f.title} className="k-rv"><span>{f.icon}</span><div><h4>{f.title}</h4><p>{f.body}</p></div></li>
+                    <li key={f.title} className="k-rv"><span>{f.icon}</span><div><h3>{f.title}</h3><p>{f.body}</p></div></li>
                   ))}
                 </ul>
                 <Chips c={c} />

@@ -45,8 +45,8 @@
 .st-feats { margin-top: 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
 .st-feat > span, .st-list li > span { width: 34px; height: 34px; flex: none; display: grid; place-items: center; background: var(--k-violet-soft); color: var(--k-violet); }
 .st-feat > span svg, .st-list li > span svg { width: 16px; height: 16px; }
-.st-feat h4 { margin-top: 20px; font-size: 17px; font-weight: 400; color: var(--k-ink); }
-.st-list h4 { font-size: 17px; font-weight: 400; color: var(--k-ink); }
+.st-feat h3 { margin-top: 20px; font-size: 17px; font-weight: 400; color: var(--k-ink); }
+.st-list h3 { font-size: 17px; font-weight: 400; color: var(--k-ink); }
 .st-feat p, .st-list p { margin-top: 6px; font-size: 14.5px; line-height: 1.6; color: var(--k-text); }
 .st-list { margin: 32px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--k-line-2); max-width: 540px; }
 .st-list li { display: flex; gap: 16px; align-items: flex-start; padding: 20px 0; border-bottom: 1px solid var(--k-line-2); }
@@ -233,3 +233,14 @@
 
 /* Light theme: back panes of the environment deck only dim slightly (darkening white reads as muddy grey). */
 .k[data-theme='light'] .st-deckpane { filter: brightness(calc(1 - var(--depth) * 0.035)); }
+
+/* Phones: scene changes fade only. Animating a blur filter forces a full repaint of the mock on every frame. */
+@media (max-width: 960px), (pointer: coarse) {
+  .st-scene-wrap { transition: opacity 0.4s ease; }
+  .st-scene-wrap.out { filter: none; }
+  .st-envswap { animation-name: st-swap-plain; }
+}
+@keyframes st-swap-plain { from { opacity: 0; translate: 0 10px; } }
+
+/* Chapters below the fold are not laid out or painted until they come near the viewport. */
+.st-ch { content-visibility: auto; contain-intrinsic-size: auto 900px; }

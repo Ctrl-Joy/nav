@@ -369,3 +369,59 @@
 
 /* Light theme: the mark's chevron turns ink while the violet slash keeps its colour (unlayered, so it beats text-white). */
 [data-theme='light'] .nav-mark:not([data-theme='dark'] *) { color: #0a0a0b; }
+
+/* ------------------------------------------------------------------
+   Phone and touch. Below the sidebar breakpoint, or on any coarse
+   pointer: controls are at least 44px tall, form text is 16px so iOS
+   does not zoom on focus, and small inline actions get a larger hit
+   area without changing how they look. Unlayered on purpose, so these
+   win over the utility classes that set desktop sizes.
+   ------------------------------------------------------------------ */
+@media (max-width: 899px), (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select {
+    min-height: 44px;
+  }
+  .nv-tap,
+  [role='menuitem'],
+  [role='tab'],
+  nav[aria-label='Sections'] > a,
+  summary {
+    min-height: 44px;
+  }
+  .nv-tap-icon { min-width: 44px; }
+  .nv-seg > button { min-height: 44px; padding-inline: 12px; }
+  /* Standalone icon-and-text links and actions (back links, "Edit", "Invite your team"). */
+  #main a:has(> svg:first-child):not(.nv-tap),
+  #main button:has(> svg:first-child):not(.nv-tap):not(:has(> svg:only-child)):not([role]) {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .nv-row { min-height: 44px; }
+  /* Switches, checkboxes and bare text buttons keep their size; the tap area grows around them. */
+  [role='switch'],
+  .nv-hit {
+    position: relative;
+  }
+  [role='switch']::after,
+  .nv-hit::after {
+    content: '';
+    position: absolute;
+    inset: -12px -6px;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* Fixed and sticky chrome stays clear of the home indicator and notches. */
+.nv-safe-b { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.nv-safe-t { padding-top: env(safe-area-inset-top, 0px); }

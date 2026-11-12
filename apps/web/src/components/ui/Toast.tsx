@@ -49,7 +49,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div aria-live="polite" aria-atomic="false" className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-[min(380px,calc(100%-2rem))] flex-col gap-2">
+      <div aria-live="polite" aria-atomic="false" className="pointer-events-none fixed right-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[100] max-[899px]:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] flex w-[min(380px,calc(100%-2rem))] flex-col gap-2">
         {items.map((t) => (
           <div
             key={t.id}
@@ -63,7 +63,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <p className="text-[13px] font-medium text-fg">{t.title}</p>
               {t.description && <p className={cn('mt-0.5 text-xs break-words text-fg-muted')}>{t.description}</p>}
             </div>
-            <button type="button" aria-label="Dismiss notification" onClick={() => dismiss(t.id)} className="rounded text-fg-subtle hover:text-fg">
+            <button type="button" aria-label="Dismiss notification" onClick={() => dismiss(t.id)} className="nv-hit rounded text-fg-subtle hover:text-fg">
               <X className="size-3.5" />
             </button>
           </div>

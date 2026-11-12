@@ -76,7 +76,7 @@ function SideNav({ query, active }: { query: string; active: string }) {
                       href={`#${s.slug}`}
                       aria-current={isActive ? 'location' : undefined}
                       className={cn(
-                        'block rounded-lg px-2.5 py-1.5 text-[14px] transition-colors',
+                        'nv-tap flex items-center rounded-[3px] px-2.5 py-1.5 text-[14px] transition-colors',
                         isActive
                           ? 'bg-surface-2 font-medium text-accent'
                           : 'text-fg-muted hover:bg-surface-2 hover:text-fg',

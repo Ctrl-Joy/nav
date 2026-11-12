@@ -168,8 +168,9 @@ export function useDeleteServiceLogStream(serviceId: string) {
 
 // Disk snapshots -----------------------------------------------------------------------------------
 
-export function useDiskSnapshots(serviceId: string) {
+export function useDiskSnapshots(serviceId: string, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: qk.serviceSnapshots(serviceId),
     queryFn: () => api.get<{ items: DiskSnapshot[] }>(`/services/${serviceId}/disk/snapshots`),
     refetchInterval: (q) => (q.state.data?.items.some((s) => s.status === 'pending' || s.status === 'restoring') ? 5_000 : false),

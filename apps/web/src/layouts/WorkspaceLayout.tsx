@@ -390,7 +390,7 @@ function Sidebar({
           <BookOpen className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
           {!collapsed && 'Docs'}
         </Link>
-        <a href="/#changelog" className={bottomLink} title={collapsed ? 'Changelog' : undefined} aria-label={collapsed ? 'Changelog' : undefined}>
+        <a href="/docs#changelog" className={bottomLink} title={collapsed ? 'Changelog' : undefined} aria-label={collapsed ? 'Changelog' : undefined}>
           <Newspaper className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
           {!collapsed && 'Changelog'}
         </a>
@@ -581,6 +581,8 @@ function MfaRequiredBanner({ ws }: { ws: string }) {
   );
 }
 
+const bottomTab = 'flex h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium text-fg-subtle transition-colors active:bg-surface-2';
+
 function BarCell({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('flex h-full items-center border-l border-border', className)}>{children}</div>;
 }
@@ -663,19 +665,10 @@ export function WorkspaceLayout() {
       </a>
       <div className="flex min-h-dvh flex-col bg-bg">
         <header className="sticky top-0 z-40 flex h-[46px] shrink-0 items-stretch border-b border-border bg-chrome">
-          <button
-            type="button"
-            aria-label="Open navigation"
-            aria-expanded={drawer}
-            onClick={() => setDrawer(true)}
-            className="flex w-[46px] shrink-0 items-center justify-center border-r border-border text-fg hover:bg-surface-2 min-[900px]:hidden"
-          >
-            <Menu className="size-4" />
-          </button>
           <Link
             to={`/w/${ctx.ws}`}
             aria-label="NAV home"
-            className="hidden w-[46px] shrink-0 items-center justify-center border-r border-border hover:bg-surface-2 min-[900px]:flex"
+            className="flex w-[48px] shrink-0 items-center justify-center border-r border-border hover:bg-surface-2 min-[900px]:w-[46px]"
           >
             <LogoMark className="h-[15px]" />
           </Link>
@@ -736,7 +729,7 @@ export function WorkspaceLayout() {
           {drawer && (
             <div className="fixed inset-0 z-50 min-[900px]:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
               <div className="absolute inset-0 animate-fade-in bg-black/60" onClick={() => setDrawer(false)} />
-              <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-chrome">
+              <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-fade-in flex-col border-r border-border bg-chrome nv-safe-b">
                 <div className="flex h-[46px] shrink-0 items-stretch border-b border-border">
                   <div className="min-w-0 flex-1">
                     <WorkspaceSwitcher ctx={ctx} onNavigate={() => setDrawer(false)} onCreateWorkspace={() => setCreateWs(true)} onCreateOrg={() => setCreateOrg(true)} className="w-full" />
@@ -758,7 +751,7 @@ export function WorkspaceLayout() {
             </div>
           )}
 
-          <main id="main" className="min-w-0 flex-1 px-4 py-6 min-[900px]:px-10 min-[900px]:py-10">
+          <main id="main" className="min-w-0 flex-1 px-4 pt-6 pb-28 min-[900px]:px-10 min-[900px]:py-10">
             <div className="mx-auto w-full max-w-[1200px]">
               {ctx.workspace.requireTwoFactor && !ctx.user.mfaEnabled && !location.pathname.endsWith('/account') && <MfaRequiredBanner ws={ctx.ws} />}
               <ErrorBoundary resetKey={location.pathname}>
@@ -767,6 +760,26 @@ export function WorkspaceLayout() {
             </div>
           </main>
         </div>
+
+        {/* Phones: the four most-used destinations sit under the thumb; everything else is one tap away in Menu. */}
+        <nav aria-label="Quick navigation" className="nv-safe-b fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-border bg-chrome min-[900px]:hidden">
+          <NavLink to={`/w/${ctx.ws}`} end className={({ isActive }) => cn(bottomTab, isActive && 'text-fg [&_svg]:text-accent')}>
+            <LayoutGrid className="size-[18px]" strokeWidth={1.75} aria-hidden />
+            Overview
+          </NavLink>
+          <NavLink to={`/w/${ctx.ws}/activity`} className={({ isActive }) => cn(bottomTab, isActive && 'text-fg [&_svg]:text-accent')}>
+            <Activity className="size-[18px]" strokeWidth={1.75} aria-hidden />
+            Events
+          </NavLink>
+          <button type="button" className={bottomTab} onClick={() => setPalette(true)}>
+            <Search className="size-[18px]" strokeWidth={1.75} aria-hidden />
+            Search
+          </button>
+          <button type="button" className={bottomTab} aria-expanded={drawer} onClick={() => setDrawer(true)}>
+            <Menu className="size-[18px]" strokeWidth={1.75} aria-hidden />
+            Menu
+          </button>
+        </nav>
       </div>
       <CommandPalette ws={ctx.ws} open={palette} onClose={() => setPalette(false)} canWrite={ctx.canWrite} />
       <CreateWorkspaceDialog open={createWs} onClose={() => setCreateWs(false)} />

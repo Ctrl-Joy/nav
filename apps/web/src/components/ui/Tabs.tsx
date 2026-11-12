@@ -10,7 +10,7 @@ export interface TabItem<T extends string = string> {
 
 const tabClass = (active: boolean) =>
   cn(
-    'relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-[13.5px] whitespace-nowrap transition-colors',
+    'nv-tap relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-0.5 text-[13.5px] whitespace-nowrap transition-colors',
     active ? 'border-accent font-medium text-fg' : 'border-transparent text-fg-muted hover:border-border-strong hover:text-fg',
   );
 

@@ -101,6 +101,17 @@
   .au-main { margin-top: 24px; }
   .au-title { font-size: 24px; }
 }
+@media (max-width: 899px), (pointer: coarse) {
+  .au-provider, .au-submit { min-height: 48px; }
+  .au-input input { height: 48px; }
+  .au-eye { width: 44px; height: 44px; right: 2px; }
+  .au-links { gap: 0; }
+  .au-links > * { min-height: 44px; display: flex; align-items: center; gap: 5px; }
+  .au-brand { min-height: 44px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .au-spin { animation-duration: 2s; }
 }
+
+/* When no sign-in provider is configured the provider grid is not rendered; the form keeps its distance from the title. */
+.au-title + .au-form, .au-sub + .au-form { margin-top: 28px; }

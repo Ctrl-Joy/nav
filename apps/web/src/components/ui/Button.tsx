@@ -6,7 +6,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outl
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const base =
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[3px] ' +
+  'nv-tap inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[3px] ' +
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-45 select-none';
 
 const variants: Record<ButtonVariant, string> = {
@@ -73,7 +73,7 @@ export function IconButton({
   ...rest
 }: Omit<ButtonProps, 'children'> & { label: string }) {
   const square = { xs: 'w-6 px-0', sm: 'w-7 px-0', md: 'w-8 px-0', lg: 'w-10 px-0' }[size];
-  return <Button aria-label={label} title={label} variant={variant} size={size} className={cn(square, className)} {...rest} />;
+  return <Button aria-label={label} title={label} variant={variant} size={size} className={cn(square, 'nv-tap-icon', className)} {...rest} />;
 }
 
 export function ButtonLink({

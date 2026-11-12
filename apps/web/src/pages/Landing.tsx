@@ -18,6 +18,7 @@ import { formatMemory } from '@/lib/format';
 import { useTheme } from '@/lib/theme';
 import { useTitle } from '@/lib/useTitle';
 import { Story } from './landing/Story';
+import { pauseOffscreen, setVar, watchBoxes } from './landing/scrollBox';
 import './landing/kivo.css';
 
 type Icon = typeof Globe | typeof Github;
@@ -94,6 +95,15 @@ function useTyped(words: string[]) {
     return () => window.clearTimeout(t);
   }, [words]);
   return text;
+}
+
+/**
+ * The rotating hero phrase. It owns its own state on purpose: the text changes every 38 to 75 ms, and keeping that
+ * state in the page component re-rendered the whole landing page (every section and mock) on each keystroke.
+ */
+function TypedPhrase() {
+  const typed = useTyped(TYPED);
+  return <span className="k-typed" aria-hidden="true">{typed}<span className="k-caret" /></span>;
 }
 
 function useInterval(fn: () => void, ms: number) {
@@ -205,35 +215,18 @@ function StartCta({ start, signedIn }: { start: string; signedIn: boolean }) {
       return;
     }
     const pairs = FLOAT_PAIRS.length;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight;
+    return watchBoxes(() => [el], ([r], vh) => {
       // -1 when the section is entering from below, 0 when centred, 1 when leaving at the top.
       const p = Math.max(-1.2, Math.min(1.2, (vh / 2 - (r.top + r.height / 2)) / ((vh + r.height) / 2)));
-      el.style.setProperty('--p', p.toFixed(4));
+      setVar(el, '--p', p.toFixed(3));
       // Pairs that have entered (counting from the top as the section rises into view) and pairs still on screen
       // (counting from the bottom as it leaves through the top). Whole numbers, so each pair pops rather than fades.
       const span = Math.min(vh, r.height) * 0.8;
       const entered = Math.floor(Math.max(0, Math.min(1, (vh - r.top) / span)) * (pairs + 0.999));
       const remaining = Math.floor(Math.max(0, Math.min(1, r.bottom / span)) * (pairs + 0.999));
-      el.style.setProperty('--ni', String(entered));
-      el.style.setProperty('--no', String(remaining));
-    };
-    // Always (re)schedule: a frame requested while the tab was hidden may never run.
-    const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(update);
-    };
-    update();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
+      setVar(el, '--ni', String(entered));
+      setVar(el, '--no', String(remaining));
+    });
   }, []);
   return (
     <section ref={ref} className="k-start" aria-labelledby="k-start-title">
@@ -282,8 +275,13 @@ export function LandingPage() {
   const [showTop, setShowTop] = useState(false);
   const [hourly, setHourly] = useState(false);
   const [open, setOpen] = useState(0);
-  const typed = useTyped(TYPED);
   useReveal(rootRef);
+  // Sections outside the viewport pause their animations (see .k-off in kivo.css).
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    return pauseOffscreen([...root.querySelectorAll('.k-hero, .k-band, .k-sec, .st-ch, .k-start, .k-foot')]);
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setShowTop(window.scrollY > 900);
@@ -332,7 +330,7 @@ export function LandingPage() {
           </button>
         </div>
       </header>
-      <div className="k-sheet" aria-hidden={!menu}>
+      <div className="k-sheet" aria-hidden={!menu} inert={!menu}>
         {links.map(([l, h]) => navLink(l, h))}
         {!signedIn && navLink('Log in', '/login')}
         <button type="button" className="k-theme-row" onClick={toggleTheme}>
@@ -348,7 +346,7 @@ export function LandingPage() {
             <h1 className="k-h1">
               Push to deploy<br />
               <span className="sr-only">web services, workers, cron jobs, Postgres and static sites</span>
-              <span className="k-typed" aria-hidden="true">{typed}<span className="k-caret" /></span>
+              <TypedPhrase />
             </h1>
             <p className="k-lede">Connect a repository and NAV builds it, health-checks it and routes traffic to it, on servers you control.</p>
             <div className="k-actions">
@@ -462,7 +460,7 @@ export function LandingPage() {
               <div key={col[0].title} className="k-foot-col">
                 {col.map((g) => (
                   <div key={g.title} className="k-foot-group">
-                    <h4>{g.title}</h4>
+                    <h3>{g.title}</h3>
                     {g.links.map(([l, href]) => {
                       // Signed-in visitors get their dashboard and account instead of sign-up / log-in.
                       const to = href === '@start' ? start : signedIn && href === '/login' ? '/account' : href;

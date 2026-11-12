@@ -29,7 +29,7 @@ import { useServiceCtx } from './context';
 export function ServiceDisksTab() {
   const { service } = useServiceCtx();
   const { canWrite, isAdmin } = useWorkspace();
-  const snaps = useDiskSnapshots(service.id);
+  const snaps = useDiskSnapshots(service.id, !!service.disk);
   const create = useCreateSnapshot(service.id);
   const restore = useRestoreSnapshot(service.id);
   const confirm = useConfirm();

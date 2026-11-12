@@ -296,7 +296,7 @@
 .k-foot { padding: clamp(64px, 8vw, 104px) var(--k-pad) 0; border-top: 1px solid var(--k-line); }
 .k-foot-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 32px 24px; }
 .k-foot-group + .k-foot-group { margin-top: 30px; }
-.k-foot h4 { font-size: 17px; font-weight: 500; color: var(--k-ink); margin-bottom: 14px; letter-spacing: -0.01em; }
+.k-foot h3 { font-size: 17px; font-weight: 500; color: var(--k-ink); margin-bottom: 14px; letter-spacing: -0.01em; }
 .k-foot-col a { display: block; width: fit-content; padding: 5px 0; font-size: 15px; color: var(--k-text); transition: color 0.15s; }
 .k-foot-col a:hover { color: var(--k-ink); }
 /* Bottom bar: brand and copyright on the left, a short row of quiet links on the right. */
@@ -379,3 +379,17 @@
 
 .k[data-theme='light'] .k-float-in { color: var(--cl, var(--c)); box-shadow: 0 1px 2px rgb(0 0 0 / 0.04); }
 .k[data-theme='light'] .k-chip { background: #7438e8; }
+
+/* Phones and touch: 44px tap targets, and no backdrop blur on the sticky bar (it repaints on every scroll frame). */
+@media (max-width: 960px), (pointer: coarse) {
+  .k-nav { background: var(--k-bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .k-burger { width: 44px; height: 44px; }
+  .k-link, .k-foot-col a, .k-foot-bottom a { min-height: 44px; display: inline-flex; align-items: center; }
+  .k-foot-col a { display: flex; padding: 0; }
+  .k-theme { width: 44px; height: 44px; }
+  .k-brand, .st-more, .k-filters button { min-height: 44px; display: inline-flex; align-items: center; }
+  .k-sheet a, .k-theme-row { min-height: 48px; display: flex; align-items: center; }
+}
+
+/* Sections outside the viewport (class set by pauseOffscreen) stop animating. */
+.k-off, .k-off *, .k-off *::before, .k-off *::after { animation-play-state: paused !important; }

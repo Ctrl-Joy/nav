@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Environment, Event as NavEvent, Member, Page, Project, Repo, Role, Workspace } from '@nav/shared';
 import { api } from './client';
@@ -152,11 +153,18 @@ export function useRepos(ws: string, enabled = true) {
 }
 
 export function useBranches(repoUrl: string | null | undefined) {
-  const url = repoUrl?.trim() ?? '';
+  const typed = repoUrl?.trim() ?? '';
+  // Wait until typing pauses, so a half-typed URL is never sent to the server (it answered each one with a 400).
+  const [url, setUrl] = useState(typed);
+  useEffect(() => {
+    const t = window.setTimeout(() => setUrl(typed), 400);
+    return () => window.clearTimeout(t);
+  }, [typed]);
   return useQuery({
     queryKey: qk.branches(url),
     queryFn: () => api.get<{ items: string[] }>('/git/branches', { repoUrl: url }),
-    enabled: /^(https?:\/\/|git@|ssh:\/\/).+/.test(url),
+    // A complete-looking remote: scheme, host and a path, or an scp-style git@host:path.
+    enabled: url === typed && /^((https?|ssh):\/\/[^\s/]+\/\S+|git@[^\s:]+:\S+)$/.test(url),
     retry: false,
     staleTime: 60_000,
   });

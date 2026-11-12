@@ -44,12 +44,14 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       }}
       className={cn(
         'm-auto w-[calc(100%-2rem)] rounded-[4px] border border-border-strong bg-popover p-0 text-fg shadow-pop',
+        // Phones: a bottom sheet, so the actions sit under the thumb and above the keyboard.
+        'max-sm:mx-0 max-sm:mt-auto max-sm:mb-0 max-sm:w-full max-sm:max-w-none max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0',
         'open:animate-slide-up backdrop:animate-fade-in',
         widths[size],
       )}
     >
       {open && (
-        <div className="flex max-h-[85dvh] flex-col">
+        <div className="nv-safe-b flex max-h-[85dvh] flex-col">
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
             <div className="min-w-0">
               <h2 id="dialog-title" className="text-[17px] font-semibold">
@@ -59,8 +61,8 @@ export function Dialog({ open, onClose, title, description, children, footer, si
             </div>
             {dismissable && <IconButton label="Close" icon={<X className="size-4" />} onClick={onClose} />}
           </div>
-          {children && <div className="overflow-y-auto px-5 py-4">{children}</div>}
-          {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>}
+          {children && <div className="overflow-y-auto overscroll-contain px-5 py-4">{children}</div>}
+          {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-3 max-sm:[&>*]:flex-1">{footer}</div>}
         </div>
       )}
     </dialog>

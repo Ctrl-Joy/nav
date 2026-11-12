@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import ShapeWaves from '@/components/reactbits/ShapeWaves';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { LogoMark } from '@/components/Logo';
 import './websiteIntro.css';
 
@@ -8,17 +7,20 @@ const INTRO_MS = 2500;
 const EXIT_MS = 600;
 /** When WebGPU is missing or fails, the static fallback is shown only briefly. */
 const FALLBACK_MS = 900;
+/** The WebGPU effect is only fetched when the intro actually plays, so every other page load skips it. */
+const ShapeWaves = lazy(() => import('@/components/reactbits/ShapeWaves'));
 const BRAND_FONT = "'Inter Variable', Inter, system-ui, sans-serif";
 
 /**
  * Decided once, when the app first loads: only a fresh visit that lands on the homepage gets the intro, and never
- * under prefers-reduced-motion. Internal navigation never re-evaluates this, and `finished` stops StrictMode
+ * under prefers-reduced-motion, and never on phones or touch devices, where holding the page behind a 2.5 s GPU
+ * animation costs more than it gives. Internal navigation never re-evaluates this, and `finished` stops StrictMode
  * double-mounts or remounts from replaying it within the same page load. A new tab or reload starts fresh.
  */
 const PLAY_ON_LOAD =
   typeof window !== 'undefined' &&
   window.location.pathname === '/' &&
-  !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  !window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 899px), (pointer: coarse)').matches;
 let finished = false;
 
 type Phase = 'show' | 'exit' | 'done';
@@ -87,6 +89,7 @@ export function WebsiteIntro() {
           <LogoMark className="nav-intro__mark" />
         </div>
       ) : (
+        <Suspense fallback={null}>
         <ShapeWaves
           text={brand}
           fontFamily={BRAND_FONT}
@@ -114,6 +117,7 @@ export function WebsiteIntro() {
           paused={false}
           onError={() => setFallback(true)}
         />
+        </Suspense>
       )}
     </div>
   );

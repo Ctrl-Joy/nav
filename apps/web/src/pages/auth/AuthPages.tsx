@@ -60,6 +60,8 @@ const SIGN_IN_PROVIDERS: AuthProvider[] = ['github', 'gitlab', 'bitbucket', 'goo
 function Providers({ next, onDisabled }: { next: string | null; onDisabled: (msg: string) => void }) {
   const config = useConfig();
   const enabled = config.data?.auth?.providers ?? { github: !!config.data?.githubEnabled };
+  // With no provider configured on this server there is nothing to offer, so the form stands alone.
+  if (!SIGN_IN_PROVIDERS.some((p) => enabled[p])) return null;
   return (
     <>
       <div className="au-providers">

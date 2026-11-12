@@ -30,6 +30,8 @@ export function openStream(opts: StreamOptions): () => void {
   let ctl: AbortController | null = null;
   let disposed = false;
   let ended = false;
+  // True while the page is hidden for navigation (unloading, or parked in the back/forward cache).
+  let paused = false;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const max = opts.maxBackoffMs ?? 30_000;
@@ -46,7 +48,7 @@ export function openStream(opts: StreamOptions): () => void {
   };
 
   const retry = () => {
-    if (disposed || ended) return;
+    if (disposed || ended || paused) return;
     attempt++;
     const delay = Math.min(max, 1000 * 2 ** Math.min(attempt - 1, 5)) * (0.75 + Math.random() * 0.5);
     opts.onState?.('reconnecting');
@@ -54,7 +56,7 @@ export function openStream(opts: StreamOptions): () => void {
   };
 
   const connect = async () => {
-    if (disposed || ended) return;
+    if (disposed || ended || paused) return;
     opts.onState?.(attempt === 0 ? 'connecting' : 'reconnecting');
     ctl = new AbortController();
     try {
@@ -90,9 +92,28 @@ export function openStream(opts: StreamOptions): () => void {
     retry();
   };
 
+  // A page that is navigated away from can be kept alive in the back/forward cache with its stream still open.
+  // Browsers allow only a handful of connections per host, so a few such pages would starve every later request
+  // and the dashboard would stop loading. Close the stream when the page is hidden and reopen it if it comes back.
+  const onHide = () => {
+    paused = true;
+    if (timer) clearTimeout(timer);
+    ctl?.abort();
+  };
+  const onShow = () => {
+    if (!paused || disposed || ended) return;
+    paused = false;
+    attempt = 0;
+    void connect();
+  };
+  window.addEventListener('pagehide', onHide);
+  window.addEventListener('pageshow', onShow);
+
   void connect();
   return () => {
     disposed = true;
+    window.removeEventListener('pagehide', onHide);
+    window.removeEventListener('pageshow', onShow);
     if (timer) clearTimeout(timer);
     ctl?.abort();
   };
