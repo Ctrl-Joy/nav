@@ -13,6 +13,7 @@ import { RESOURCE_META } from '@/components/ResourceIcon';
 import {
   Badge,
   Button,
+  buttonClass,
   Card,
   CardBody,
   CardHeader,
@@ -102,6 +103,8 @@ function Wizard({ type }: { type: ServiceType }) {
   const envGroups = useEnvGroups(ws);
   const githubEnabled = !!config?.githubEnabled;
   const repos = useRepos(ws, githubEnabled);
+  // Repos from the app carry an installation id; if none do, pushes will not auto-deploy until the app is installed.
+  const needsApp = !!config?.githubAppSlug && !!repos.data && !repos.data.items.some((r) => r.installationId !== null);
 
   const [step, setStep] = useState<1 | 2>(1);
   const [source, setSource] = useState<SourceKind>(githubEnabled ? 'github' : 'git');
@@ -247,6 +250,26 @@ function Wizard({ type }: { type: ServiceType }) {
             {source === 'github' && (
               <div className="space-y-3">
                 <Input leading={<Search className="size-3.5" />} placeholder="Search repositories" aria-label="Search repositories" value={repoFilter} onChange={(e) => setRepoFilter(e.target.value)} />
+                {needsApp && (
+                  <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-[13px] text-fg-muted">
+                      <span className="font-medium text-fg">Deploy on every push.</span> Install the NAV GitHub App once and your pushes deploy automatically.
+                    </p>
+                    <div className="flex shrink-0 gap-2">
+                      <a
+                        className={buttonClass('secondary', 'sm')}
+                        href={`https://github.com/apps/${config?.githubAppSlug}/installations/new`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Install app
+                      </a>
+                      <Button size="sm" variant="ghost" onClick={() => repos.refetch()} loading={repos.isFetching}>
+                        I installed it
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {repos.isPending ? (
                   <div className="space-y-2">
                     {[0, 1, 2].map((i) => (
