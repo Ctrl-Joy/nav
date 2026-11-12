@@ -72,8 +72,13 @@ main() {
     upgrade)
       [[ -f $CONFIG_ENV ]] || die "NAV is not installed here ($CONFIG_ENV missing); run the installer without --upgrade first"
       check_os
-      repo=$(prev NAV_INSTALL_REPO); branch=$(prev NAV_INSTALL_BRANCH)
-      deploy_code "${repo:-$DEFAULT_REPO}" "${branch:-$DEFAULT_BRANCH}"
+      # --repo / --branch win over the saved values and are remembered, so `--upgrade --repo <url>` moves an install to a new source.
+      local saved_repo saved_branch
+      saved_repo=$(prev NAV_INSTALL_REPO); saved_branch=$(prev NAV_INSTALL_BRANCH)
+      repo=${repo:-$saved_repo}; branch=${branch:-$saved_branch}
+      repo=${repo:-$DEFAULT_REPO}; branch=${branch:-$DEFAULT_BRANCH}
+      deploy_code "$repo" "$branch"
+      remember_install_source "$repo" "$branch"
       write_units
       run_migrations
       restart_units
@@ -184,7 +189,7 @@ Usage: sudo bash install.sh --domain <domain> --email <you@example.com> [options
   --production-certs     use the Let's Encrypt production directory (default: staging, untrusted by browsers)
   --staging-certs        switch back to the staging directory
   --skip-firewall        do not touch ufw / iptables
-  --upgrade              pull the latest code, npm ci, build, migrate and restart
+  --upgrade              pull the latest code, npm ci, build, migrate and restart (add --repo/--branch to change the source)
   --uninstall [--purge]  stop and remove the services; --purge also deletes code, data, config and the database
 
 Re-running keeps generated secrets (/etc/nav/nav.env) and reuses previous values for omitted flags.
@@ -211,6 +216,17 @@ acme_label() { if [[ $1 == "$ACME_PRODUCTION" ]]; then echo "Let's Encrypt (prod
 
 # A previous value from the generated configuration (read, never sourced).
 prev() { [[ -f $CONFIG_ENV ]] || return 0; sed -n "s/^$1=//p" "$CONFIG_ENV" | tail -n 1; }
+
+# Writes the repository and branch a later `--upgrade` should pull from back into config.env (only when they changed).
+remember_install_source() {
+  local repo=$1 branch=$2 tmp
+  [[ $(prev NAV_INSTALL_REPO) == "$repo" && $(prev NAV_INSTALL_BRANCH) == "$branch" ]] && return 0
+  tmp=$(mktemp "$CONFIG_ENV.XXXXXX")
+  { grep -vE '^NAV_INSTALL_(REPO|BRANCH)=' "$CONFIG_ENV" || true; echo "NAV_INSTALL_REPO=$repo"; echo "NAV_INSTALL_BRANCH=$branch"; } >"$tmp"
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$CONFIG_ENV"
+  log "upgrades now pull from $repo ($branch)"
+}
 
 # The clone this script runs from, if any (empty when piped from curl).
 script_clone() {

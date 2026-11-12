@@ -31,8 +31,16 @@ startLogStreams();
 startMetricsStreams();
 startWakeListener();
 
+let stopping = false;
 const shutdown = async () => {
-  await app.close().catch(() => {});
+  if (stopping) return;
+  stopping = true;
+  // Fastify's close() waits for every open connection, and live dashboard streams (SSE) never end on their own, which kept
+  // the process alive until systemd killed it 90 seconds later. Drop the connections, and bound the whole shutdown.
+  setTimeout(() => process.exit(0), 8_000).unref();
+  const closing = app.close().catch(() => {});
+  app.server.closeAllConnections?.();
+  await closing;
   await pool.end().catch(() => {});
   process.exit(0);
 };
