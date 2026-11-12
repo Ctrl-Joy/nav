@@ -522,7 +522,8 @@ function Wizard({ type }: { type: ServiceType }) {
             )}
           </Card>
 
-          <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-bg/90 px-4 py-3 backdrop-blur md:mx-0 md:rounded-lg md:border">
+          {/* Below the sidebar breakpoint the fixed bottom bar (3.5rem + safe area) owns the screen edge, so this bar sits above it. */}
+          <div className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-bg px-4 py-3 min-[900px]:bottom-0 md:mx-0 md:rounded-lg md:border">
             {(envError || (type === 'cron' && !cron.valid)) && <span className="mr-auto text-xs text-danger">{envError ?? cron.error}</span>}
             <Button onClick={() => setStep(1)} icon={<ArrowLeft className="size-3.5" />}>
               Back
