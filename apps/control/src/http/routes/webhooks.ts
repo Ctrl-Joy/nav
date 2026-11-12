@@ -55,7 +55,8 @@ export async function webhookRoutes(app: FastifyInstance) {
       const waiting = [];
       for (const s of svcs) {
         if (!matchesBuildFilter(s.root_dir, s.build_filter, changedFiles)) continue;
-        if (body.installation?.id && !s.installation_id) await q('UPDATE services SET installation_id = $2 WHERE id = $1', [s.id, body.installation.id]);
+        // A reinstalled app has a new installation id, so keep the service on the one GitHub is using now.
+        if (body.installation?.id && Number(s.installation_id) !== Number(body.installation.id)) await q('UPDATE services SET installation_id = $2 WHERE id = $1', [s.id, body.installation.id]);
         const commit = { sha: body.after as string, message: message.split('\n')[0].slice(0, 500), author: head?.author?.name ?? head?.author?.username ?? null };
         if (s.auto_deploy === 'checks') {
           await awaitChecks(s, commit);

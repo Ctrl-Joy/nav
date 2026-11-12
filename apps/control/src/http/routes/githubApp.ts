@@ -63,6 +63,14 @@ export async function githubAppRoutes(app: FastifyInstance) {
         'INSERT INTO github_installations (id, workspace_id, account_login, account_type) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET workspace_id = EXCLUDED.workspace_id, account_login = EXCLUDED.account_login, account_type = EXCLUDED.account_type',
         [inst.id, state.w, inst.account.login, inst.account.type],
       );
+      // Services created before the app was installed (or under an earlier installation) start using this one straight away.
+      // Logins are letters, digits and hyphens only, so the owner can go into a LIKE pattern as it is.
+      if (/^[a-z0-9-]+$/i.test(inst.account.login)) {
+        await q(
+          'UPDATE services SET installation_id = $1 WHERE workspace_id = $2 AND lower(repo_url) LIKE $3 AND installation_id IS DISTINCT FROM $1',
+          [inst.id, state.w, `https://github.com/${inst.account.login.toLowerCase()}/%`],
+        );
+      }
       await recordEvent({ workspaceId: state.w, kind: 'github.app.linked', actorId: user.id, data: { installationId: inst.id, account: inst.account.login } }).catch(() => {});
       return back('installed');
     } catch (err) {
