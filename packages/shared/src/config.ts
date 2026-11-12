@@ -59,7 +59,8 @@ export const config = {
     clientSecret: process.env.NAV_GITHUB_CLIENT_SECRET ?? '',
     appId: process.env.NAV_GITHUB_APP_ID ?? '',
     appSlug: process.env.NAV_GITHUB_APP_SLUG ?? '',
-    privateKey: (process.env.NAV_GITHUB_APP_PRIVATE_KEY ?? '').replace(/\n/g, '\n'),
+    // Env files hold one line per value, so the PEM key is written with literal "\n" sequences; turn them back into newlines.
+    privateKey: (process.env.NAV_GITHUB_APP_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
     webhookSecret: process.env.NAV_GITHUB_WEBHOOK_SECRET ?? '',
   },
   /** Extra sign-in providers. Each is enabled when its client id and secret are set. */
