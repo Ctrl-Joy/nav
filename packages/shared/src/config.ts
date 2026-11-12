@@ -59,8 +59,12 @@ export const config = {
     clientSecret: process.env.NAV_GITHUB_CLIENT_SECRET ?? '',
     appId: process.env.NAV_GITHUB_APP_ID ?? '',
     appSlug: process.env.NAV_GITHUB_APP_SLUG ?? '',
-    // Env files hold one line per value, so the PEM key is written with literal "\n" sequences; turn them back into newlines.
-    privateKey: (process.env.NAV_GITHUB_APP_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
+    // Env files hold one line per value. Either NAV_GITHUB_APP_PRIVATE_KEY_B64 (the PEM, base64-encoded: safest, because systemd
+    // leaves it untouched) or NAV_GITHUB_APP_PRIVATE_KEY with literal "\n" sequences, which must be wrapped in double quotes in a
+    // systemd EnvironmentFile or the backslashes are dropped.
+    privateKey: process.env.NAV_GITHUB_APP_PRIVATE_KEY_B64
+      ? Buffer.from(process.env.NAV_GITHUB_APP_PRIVATE_KEY_B64.trim(), 'base64').toString('utf8')
+      : (process.env.NAV_GITHUB_APP_PRIVATE_KEY ?? '').replace(/\\n/g, '\n'),
     webhookSecret: process.env.NAV_GITHUB_WEBHOOK_SECRET ?? '',
   },
   /** Extra sign-in providers. Each is enabled when its client id and secret are set. */

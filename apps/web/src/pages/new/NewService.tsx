@@ -107,7 +107,9 @@ function Wizard({ type }: { type: ServiceType }) {
   const needsApp = !!config?.githubAppSlug && !!repos.data && !repos.data.items.some((r) => r.installationId !== null);
 
   const [step, setStep] = useState<1 | 2>(1);
-  const [source, setSource] = useState<SourceKind>(githubEnabled ? 'github' : 'git');
+  // The server config can arrive after this page mounts, so the default follows it until the user picks a source.
+  const [pickedSource, setSource] = useState<SourceKind | null>(null);
+  const source: SourceKind = pickedSource ?? (githubEnabled ? 'github' : 'git');
   const [repoFilter, setRepoFilter] = useState('');
   const [repoUrl, setRepoUrl] = useState('');
   const [branch, setBranch] = useState('');

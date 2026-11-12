@@ -1137,6 +1137,10 @@ NAV_DUCKDNS_TOKEN=<token from duckdns.org>`,
         type: 'p',
         text: "For GitHub, create a GitHub App whose webhook points at `/api/v1/webhooks/github`, and an OAuth app, then set the `NAV_GITHUB_*` variables. The full list is in `packages/shared/src/config.ts`. Commit status is reported back to GitHub when the GitHub App is configured.",
       },
+      {
+        type: 'p',
+        text: "Put the app's private key in `/etc/nav/override.env` as `NAV_GITHUB_APP_PRIVATE_KEY_B64` (the .pem file base64-encoded onto one line, for example `base64 -w0 key.pem`). A plain `NAV_GITHUB_APP_PRIVATE_KEY` with `\\n` sequences also works, but only inside double quotes: systemd drops the backslashes from an unquoted value and the key becomes unreadable. Give the app read access to contents and pull requests, read and write access to commit statuses, and subscribe it to the push and pull request events.",
+      },
     ],
   },
   {
