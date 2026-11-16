@@ -97,7 +97,7 @@ function SideNav({ query, active }: { query: string; active: string }) {
 }
 
 export function DocsPage() {
-  useTitle('Docs');
+  useTitle('Docs: Deploy Services, Cron Jobs and Postgres');
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(FIRST_SECTION);
 

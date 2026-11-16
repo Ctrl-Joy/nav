@@ -135,7 +135,7 @@ function Alert({ kind, children }: { kind: 'err' | 'ok' | 'info'; children: Reac
 }
 
 export function LoginPage() {
-  useTitle('Sign in');
+  useTitle('Sign In to Your Self-Hosted PaaS');
   const me = useMe();
   const login = useLogin();
   const navigate = useNavigate();
@@ -182,7 +182,7 @@ export function LoginPage() {
 }
 
 export function SignupPage() {
-  useTitle('Sign up');
+  useTitle('Sign Up and Deploy from Git');
   const me = useMe();
   const signup = useSignup();
   const navigate = useNavigate();

@@ -156,7 +156,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     const rel = decodeURIComponent(req.url.split('?')[0]);
     const file = path.resolve(webDist, '.' + rel);
     if (file.startsWith(webDist) && existsSync(file) && !file.endsWith(path.sep) && path.extname(file)) {
-      const types: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.json': 'application/json', '.html': 'text/html', '.txt': 'text/plain; charset=utf-8' };
+      const types: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.json': 'application/json', '.html': 'text/html', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8' };
       reply.header('cache-control', rel.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
       return reply.type(types[path.extname(file)] ?? 'application/octet-stream').send(await readFile(file));
     }

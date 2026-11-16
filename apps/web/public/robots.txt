@@ -1,2 +1,15 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /internal/
+Disallow: /scim/
+Disallow: /w/
+Disallow: /app
+Disallow: /account
+Disallow: /deploy$
+Disallow: /deploy?
+Disallow: /login/mfa
+Disallow: /sso
+Disallow: /reset-password
+
+Sitemap: https://dashboard.navhost.duckdns.org/sitemap.xml

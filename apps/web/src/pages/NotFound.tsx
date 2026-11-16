@@ -4,7 +4,7 @@ import { buttonClass } from '@/components/ui/Button';
 import { useTitle } from '@/lib/useTitle';
 
 export function NotFoundPage() {
-  useTitle('Not found');
+  useTitle('Page Not Found');
   return (
     <div className="flex min-h-[70dvh] flex-col items-center justify-center px-6 text-center">
       <div className="relative mb-6">
